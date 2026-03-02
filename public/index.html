@@ -13,12 +13,8 @@
       overflow: hidden;
       height: 100vh;
     }
-    canvas {
-      display: block;
-      cursor: crosshair;
-    }
+    canvas { display: block; cursor: crosshair; }
 
-    /* Screens */
     .screen {
       display: none;
       position: absolute;
@@ -40,14 +36,9 @@
       background: linear-gradient(90deg, #e74c3c, #f39c12, #2ecc71, #3498db, #9b59b6);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      text-shadow: none;
     }
-    #startScreen .subtitle {
-      font-size: 18px;
-      color: #888;
-      margin-bottom: 40px;
-    }
-    #startScreen input {
+    .subtitle { font-size: 18px; color: #888; margin-bottom: 40px; }
+    input[type="text"] {
       width: 280px;
       padding: 12px 16px;
       font-size: 16px;
@@ -55,12 +46,13 @@
       border-radius: 8px;
       background: #151530;
       color: #eee;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
       text-align: center;
       outline: none;
       transition: border-color 0.2s;
     }
-    #startScreen input:focus { border-color: #3498db; }
+    input[type="text"]:focus { border-color: #3498db; }
+    .btn-row { display: flex; gap: 12px; margin-top: 8px; }
 
     .btn {
       padding: 12px 32px;
@@ -73,53 +65,25 @@
     }
     .btn:hover { transform: scale(1.05); }
     .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.4; cursor: default; transform: none; }
     .btn-primary { background: #3498db; color: #fff; }
     .btn-green { background: #2ecc71; color: #fff; }
     .btn-red { background: #e74c3c; color: #fff; }
     .btn-gray { background: #555; color: #fff; }
     .btn-yellow { background: #f39c12; color: #fff; }
 
-    /* Lobby Browser */
-    #lobbyBrowser {
+    /* Join Screen */
+    #joinScreen {
       background: linear-gradient(135deg, #0a0a2e 0%, #1a1a3e 100%);
     }
-    #lobbyBrowser h2 { margin-bottom: 20px; font-size: 32px; }
-    .lobby-actions { display: flex; gap: 12px; margin-bottom: 20px; }
-    .lobby-actions input {
-      padding: 10px 14px;
-      font-size: 14px;
-      border: 2px solid #333;
-      border-radius: 8px;
-      background: #151530;
-      color: #eee;
-      outline: none;
+    #joinScreen h2 { margin-bottom: 20px; font-size: 32px; }
+    #codeInput {
       width: 200px;
+      font-size: 28px;
+      letter-spacing: 8px;
+      text-transform: uppercase;
+      font-weight: 700;
     }
-    .lobby-actions input:focus { border-color: #3498db; }
-    #lobbyListContainer {
-      width: 400px;
-      max-height: 300px;
-      overflow-y: auto;
-      background: #151530;
-      border-radius: 8px;
-      border: 1px solid #333;
-    }
-    .lobby-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 16px;
-      border-bottom: 1px solid #222;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .lobby-item:hover { background: #1e1e40; }
-    .lobby-item:last-child { border-bottom: none; }
-    .lobby-item .info { display: flex; flex-direction: column; }
-    .lobby-item .info .name { font-weight: 600; }
-    .lobby-item .info .count { font-size: 12px; color: #888; }
-    .lobby-item .join-btn { padding: 6px 16px; font-size: 13px; }
-    .no-lobbies { padding: 30px; text-align: center; color: #666; }
     .back-link {
       margin-top: 20px;
       color: #888;
@@ -128,18 +92,28 @@
     }
     .back-link:hover { color: #ccc; }
 
-    /* Lobby Room */
-    #lobbyRoom {
+    /* Room Screen */
+    #roomScreen {
       background: linear-gradient(135deg, #0a0a2e 0%, #1a1a3e 100%);
     }
-    #lobbyRoom h2 { margin-bottom: 4px; }
-    #lobbyRoom .room-id { color: #666; font-size: 13px; margin-bottom: 20px; }
+    #roomScreen h2 { margin-bottom: 4px; }
+    .room-code {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: 10px;
+      color: #f39c12;
+      margin: 8px 0 4px;
+      font-family: monospace;
+    }
+    .room-hint { color: #666; font-size: 13px; margin-bottom: 20px; }
     .player-list {
       width: 360px;
       background: #151530;
       border-radius: 8px;
       border: 1px solid #333;
       margin-bottom: 20px;
+      max-height: 280px;
+      overflow-y: auto;
     }
     .player-entry {
       display: flex;
@@ -155,6 +129,15 @@
     .player-entry .ready-tag.yes { background: #2ecc71; color: #fff; }
     .player-entry .ready-tag.no { background: #555; color: #aaa; }
     .lobby-buttons { display: flex; gap: 12px; }
+
+    /* Status Messages */
+    .status-msg {
+      color: #888;
+      font-size: 14px;
+      margin-top: 12px;
+      min-height: 20px;
+    }
+    .status-msg.error { color: #e74c3c; }
 
     /* Game HUD */
     #gameScreen { background: #000; }
@@ -175,10 +158,10 @@
       font-size: 13px;
       min-width: 160px;
     }
-    #scoreboard .sb-header { font-weight: 700; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }
-    #scoreboard .sb-row { display: flex; justify-content: space-between; padding: 2px 0; }
-    #scoreboard .sb-row .sb-name { margin-right: 16px; }
-    #scoreboard .sb-row .sb-kd { color: #aaa; }
+    .sb-header { font-weight: 700; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }
+    .sb-row { display: flex; justify-content: space-between; padding: 2px 0; }
+    .sb-row .sb-name { margin-right: 16px; }
+    .sb-row .sb-kd { color: #aaa; }
     #healthBar {
       position: absolute;
       bottom: 20px;
@@ -211,8 +194,6 @@
       opacity: 0.6;
     }
     #leaveBtn:hover { opacity: 1; }
-
-    /* Minimap */
     #minimap {
       position: absolute;
       bottom: 50px;
@@ -231,32 +212,33 @@
     <h1>SHOOTER</h1>
     <div class="subtitle">Multiplayer 2D Arena</div>
     <input type="text" id="nameInput" placeholder="Enter your name" maxlength="16" />
-    <button class="btn btn-primary" id="playBtn">PLAY</button>
+    <div class="btn-row">
+      <button class="btn btn-green" id="createBtn">Create Game</button>
+      <button class="btn btn-primary" id="joinBtn">Join Game</button>
+    </div>
   </div>
 
-  <!-- Lobby Browser -->
-  <div id="lobbyBrowser" class="screen">
-    <h2>Lobbies</h2>
-    <div class="lobby-actions">
-      <input type="text" id="lobbyNameInput" placeholder="New lobby name" maxlength="24" />
-      <button class="btn btn-green" id="createLobbyBtn">Create</button>
-    </div>
-    <div id="lobbyListContainer">
-      <div class="no-lobbies">No lobbies yet. Create one!</div>
-    </div>
-    <div class="back-link" id="backToStart">Back</div>
+  <!-- Join Screen -->
+  <div id="joinScreen" class="screen">
+    <h2>Join Game</h2>
+    <input type="text" id="codeInput" placeholder="CODE" maxlength="4" />
+    <button class="btn btn-primary" id="connectBtn">Connect</button>
+    <div class="status-msg" id="joinStatus"></div>
+    <div class="back-link" id="joinBack">Back</div>
   </div>
 
-  <!-- Lobby Room -->
-  <div id="lobbyRoom" class="screen">
-    <h2 id="roomName">Lobby</h2>
-    <div class="room-id" id="roomId"></div>
+  <!-- Room Screen -->
+  <div id="roomScreen" class="screen">
+    <h2>Game Lobby</h2>
+    <div class="room-code" id="roomCode">----</div>
+    <div class="room-hint">Share this code with friends</div>
     <div class="player-list" id="playerList"></div>
     <div class="lobby-buttons">
       <button class="btn btn-yellow" id="readyBtn">Ready</button>
       <button class="btn btn-green" id="startGameBtn" style="display:none">Start Game</button>
       <button class="btn btn-gray" id="leaveLobbyBtn">Leave</button>
     </div>
+    <div class="status-msg" id="roomStatus"></div>
   </div>
 
   <!-- Game Screen -->
@@ -271,7 +253,7 @@
     </div>
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
