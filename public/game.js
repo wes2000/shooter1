@@ -2,14 +2,28 @@
 // CONSTANTS
 // ========================
 const MAP_W = 2000, MAP_H = 2000;
-const PLAYER_R = 18, PLAYER_SPEED = 4;
+const PLAYER_R = 18;
 const BULLET_R = 4;
-const MAX_HP = 100, RESPAWN_TIME = 3000;
+const RESPAWN_TIME = 3000;
 const TICK_RATE = 60;
 const PICKUP_RADIUS = 22;
 const PICKUP_RESPAWN = 20000;
 const EXPLOSION_RADIUS = 60, EXPLOSION_DMG = 20, EXPLOSION_DURATION = 400;
+const TURRET_R = 12, TURRET_RANGE = 300, TURRET_FIRE_RATE = 1000, TURRET_DURATION = 10000, TURRET_HP = 50;
+const SHIELD_DURATION = 5000;
+const DASH_DIST = 150, DASH_INVULN = 200;
+const CLOAK_DURATION = 4000;
 const COLORS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#00cec9','#fd79a8','#6c5ce7'];
+
+// ========================
+// CLASSES
+// ========================
+const CLASS_DEFS = {
+  tank:     { name: 'Tank',     hp: 150, speed: 3.2, ability: 'Shield Wall', cooldown: 15000 },
+  scout:    { name: 'Scout',    hp: 75,  speed: 5.5, ability: 'Dash',        cooldown: 8000 },
+  engineer: { name: 'Engineer', hp: 100, speed: 4.0, ability: 'Turret',      cooldown: 20000 },
+  ghost:    { name: 'Ghost',    hp: 85,  speed: 4.5, ability: 'Cloak',       cooldown: 12000 },
+};
 
 // ========================
 // WEAPONS
@@ -39,74 +53,47 @@ const WEAPONS = {
     spread: 0, projectiles: 1, bulletColor: '#00ffff',
     infinite: false, reserveAmmo: 10, pierce: true,
   },
+  turret: {
+    name: 'Turret', clip: 999, reloadTime: 0, cooldown: 1000,
+    damage: 10, speed: 10, lifetime: 1500, bounces: 0,
+    spread: 0.04, projectiles: 1, bulletColor: '#ff9f43',
+    infinite: true, reserveAmmo: 0,
+  },
 };
 
 // ========================
 // MAP: WALLS
 // ========================
 const WALLS = [
-  // Center cross
   { x: 960, y: 900, w: 80, h: 200 },
   { x: 900, y: 960, w: 200, h: 80 },
-  // Top-left L
-  { x: 300, y: 300, w: 90, h: 20 },
-  { x: 300, y: 300, w: 20, h: 90 },
-  // Top-right L
-  { x: 1610, y: 300, w: 90, h: 20 },
-  { x: 1680, y: 300, w: 20, h: 90 },
-  // Bottom-left L
-  { x: 300, y: 1680, w: 90, h: 20 },
-  { x: 300, y: 1610, w: 20, h: 90 },
-  // Bottom-right L
-  { x: 1610, y: 1680, w: 90, h: 20 },
-  { x: 1680, y: 1610, w: 20, h: 90 },
-  // Quadrant boxes
-  { x: 550, y: 550, w: 50, h: 50 },
-  { x: 1400, y: 550, w: 50, h: 50 },
-  { x: 550, y: 1400, w: 50, h: 50 },
-  { x: 1400, y: 1400, w: 50, h: 50 },
-  // Horizontal covers
-  { x: 400, y: 730, w: 120, h: 20 },
-  { x: 1480, y: 730, w: 120, h: 20 },
-  { x: 400, y: 1250, w: 120, h: 20 },
-  { x: 1480, y: 1250, w: 120, h: 20 },
-  // Vertical side covers
-  { x: 700, y: 400, w: 20, h: 100 },
-  { x: 1280, y: 400, w: 20, h: 100 },
-  { x: 700, y: 1500, w: 20, h: 100 },
-  { x: 1280, y: 1500, w: 20, h: 100 },
-  // Side bunkers
-  { x: 100, y: 920, w: 20, h: 160 },
-  { x: 1880, y: 920, w: 20, h: 160 },
-  { x: 920, y: 100, w: 160, h: 20 },
-  { x: 920, y: 1880, w: 160, h: 20 },
-  // Mid-lane covers
-  { x: 400, y: 1000, w: 100, h: 20 },
-  { x: 1500, y: 980, w: 100, h: 20 },
-  { x: 980, y: 400, w: 20, h: 100 },
-  { x: 1000, y: 1500, w: 20, h: 100 },
+  { x: 300, y: 300, w: 90, h: 20 }, { x: 300, y: 300, w: 20, h: 90 },
+  { x: 1610, y: 300, w: 90, h: 20 }, { x: 1680, y: 300, w: 20, h: 90 },
+  { x: 300, y: 1680, w: 90, h: 20 }, { x: 300, y: 1610, w: 20, h: 90 },
+  { x: 1610, y: 1680, w: 90, h: 20 }, { x: 1680, y: 1610, w: 20, h: 90 },
+  { x: 550, y: 550, w: 50, h: 50 }, { x: 1400, y: 550, w: 50, h: 50 },
+  { x: 550, y: 1400, w: 50, h: 50 }, { x: 1400, y: 1400, w: 50, h: 50 },
+  { x: 400, y: 730, w: 120, h: 20 }, { x: 1480, y: 730, w: 120, h: 20 },
+  { x: 400, y: 1250, w: 120, h: 20 }, { x: 1480, y: 1250, w: 120, h: 20 },
+  { x: 700, y: 400, w: 20, h: 100 }, { x: 1280, y: 400, w: 20, h: 100 },
+  { x: 700, y: 1500, w: 20, h: 100 }, { x: 1280, y: 1500, w: 20, h: 100 },
+  { x: 100, y: 920, w: 20, h: 160 }, { x: 1880, y: 920, w: 20, h: 160 },
+  { x: 920, y: 100, w: 160, h: 20 }, { x: 920, y: 1880, w: 160, h: 20 },
+  { x: 400, y: 1000, w: 100, h: 20 }, { x: 1500, y: 980, w: 100, h: 20 },
+  { x: 980, y: 400, w: 20, h: 100 }, { x: 1000, y: 1500, w: 20, h: 100 },
 ];
 
 // ========================
 // MAP: PICKUP SPAWN POINTS
 // ========================
 const PICKUP_DEFS = [
-  // Health packs (green +)
   { x: 1000, y: 1000, type: 'health' },
-  { x: 250, y: 1000, type: 'health' },
-  { x: 1750, y: 1000, type: 'health' },
-  { x: 1000, y: 250, type: 'health' },
-  { x: 1000, y: 1750, type: 'health' },
-  // Weapons
-  { x: 450, y: 450, type: 'shotgun' },
-  { x: 1550, y: 450, type: 'smg' },
-  { x: 450, y: 1550, type: 'sniper' },
-  { x: 1550, y: 1550, type: 'shotgun' },
-  // Ammo mods
-  { x: 750, y: 750, type: 'piercing' },
-  { x: 1250, y: 750, type: 'explosive' },
-  { x: 750, y: 1250, type: 'explosive' },
-  { x: 1250, y: 1250, type: 'piercing' },
+  { x: 250, y: 1000, type: 'health' }, { x: 1750, y: 1000, type: 'health' },
+  { x: 1000, y: 250, type: 'health' }, { x: 1000, y: 1750, type: 'health' },
+  { x: 450, y: 450, type: 'shotgun' }, { x: 1550, y: 450, type: 'smg' },
+  { x: 450, y: 1550, type: 'sniper' }, { x: 1550, y: 1550, type: 'shotgun' },
+  { x: 750, y: 750, type: 'piercing' }, { x: 1250, y: 750, type: 'explosive' },
+  { x: 750, y: 1250, type: 'explosive' }, { x: 1250, y: 1250, type: 'piercing' },
 ];
 
 // ========================
@@ -133,6 +120,9 @@ const ammoCountEl = $('ammoCount');
 const ammoModEl = $('ammoMod');
 const reloadBarEl = $('reloadBar');
 const reloadFillEl = $('reloadFill');
+const abilityNameEl = $('abilityName');
+const abilityCdFillEl = $('abilityCdFill');
+const abilityDisplayEl = $('abilityDisplay');
 
 // ========================
 // STATE
@@ -143,18 +133,15 @@ let isHost = false;
 let roomCode = '';
 let peer = null;
 let currentScreen = 'start';
+let selectedClass = 'tank';
 
-// Host state
 let hostConns = {};
 let lobbyPlayers = {};
 let nextPlayerId = 1;
 let gameState = null;
 let gameLoopInterval = null;
-
-// Client state
 let hostConn = null;
 
-// Shared
 let snapshot = null;
 let keys = { up: false, down: false, left: false, right: false };
 let mouseX = 0, mouseY = 0, mouseDown = false;
@@ -166,49 +153,27 @@ let killNotifications = [];
 // ========================
 // HELPERS
 // ========================
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function generateRoomCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let code = '';
-  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
+  const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; let r = '';
+  for (let i = 0; i < 4; i++) r += c[Math.floor(Math.random() * c.length)]; return r;
 }
+function showScreen(name) { for (const k in screens) screens[k].classList.remove('active'); screens[name].classList.add('active'); currentScreen = name; }
+function setStatus(el, msg, err) { el.textContent = msg; el.className = 'status-msg' + (err ? ' error' : ''); }
+function circleRectOverlap(cx, cy, r, w) { const nx = Math.max(w.x, Math.min(cx, w.x+w.w)), ny = Math.max(w.y, Math.min(cy, w.y+w.h)), dx = cx-nx, dy = cy-ny; return dx*dx+dy*dy < r*r; }
+function pointInRect(px, py, w) { return px >= w.x && px <= w.x+w.w && py >= w.y && py <= w.y+w.h; }
 
-function showScreen(name) {
-  for (const k in screens) screens[k].classList.remove('active');
-  screens[name].classList.add('active');
-  currentScreen = name;
-}
-
-function setStatus(el, msg, isError) {
-  el.textContent = msg;
-  el.className = 'status-msg' + (isError ? ' error' : '');
-}
-
-function circleRectOverlap(cx, cy, r, wall) {
-  const nx = Math.max(wall.x, Math.min(cx, wall.x + wall.w));
-  const ny = Math.max(wall.y, Math.min(cy, wall.y + wall.h));
-  const dx = cx - nx, dy = cy - ny;
-  return dx * dx + dy * dy < r * r;
-}
-
-function pointInRect(px, py, wall) {
-  return px >= wall.x && px <= wall.x + wall.w && py >= wall.y && py <= wall.y + wall.h;
+function getAllWalls() {
+  if (!gameState || !gameState.shieldWalls.length) return WALLS;
+  return WALLS.concat(gameState.shieldWalls);
 }
 
 function safeSpawnPos() {
+  const walls = gameState ? getAllWalls() : WALLS;
   for (let i = 0; i < 100; i++) {
-    const x = 120 + Math.random() * (MAP_W - 240);
-    const y = 120 + Math.random() * (MAP_H - 240);
+    const x = 120 + Math.random() * (MAP_W - 240), y = 120 + Math.random() * (MAP_H - 240);
     let ok = true;
-    for (const w of WALLS) {
-      if (circleRectOverlap(x, y, PLAYER_R + 10, w)) { ok = false; break; }
-    }
+    for (const w of walls) { if (circleRectOverlap(x, y, PLAYER_R + 10, w)) { ok = false; break; } }
     if (ok) return { x, y };
   }
   return { x: MAP_W / 2, y: MAP_H / 2 };
@@ -217,14 +182,7 @@ function safeSpawnPos() {
 // ========================
 // PEER SETUP
 // ========================
-const PEER_CONFIG = {
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-    ]
-  }
-};
+const PEER_CONFIG = { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] } };
 
 // ========================
 // HOST: CREATE ROOM
@@ -236,7 +194,7 @@ function createRoom() {
   peer.on('open', () => {
     isHost = true;
     myPlayerId = '0';
-    lobbyPlayers = { '0': { name: myName, ready: true } };
+    lobbyPlayers = { '0': { name: myName, ready: true, playerClass: selectedClass } };
     roomCodeEl.textContent = roomCode;
     $('startGameBtn').style.display = 'inline-block';
     updateRoomDisplay();
@@ -246,71 +204,58 @@ function createRoom() {
 
   peer.on('connection', (conn) => {
     let pid = null;
-
     conn.on('data', (data) => {
       if (!data || !data.type) return;
-
       if (data.type === 'join' && !pid) {
         pid = String(nextPlayerId++);
-        lobbyPlayers[pid] = { name: String(data.name).slice(0, 16) || 'Player', ready: false };
+        lobbyPlayers[pid] = { name: String(data.name).slice(0, 16) || 'Player', ready: false, playerClass: 'tank' };
         hostConns[pid] = conn;
         conn.send({ type: 'joined', yourId: pid });
         broadcastLobbyState();
         updateRoomDisplay();
       }
-
       if (data.type === 'ready' && pid && lobbyPlayers[pid]) {
         lobbyPlayers[pid].ready = !lobbyPlayers[pid].ready;
-        broadcastLobbyState();
-        updateRoomDisplay();
+        broadcastLobbyState(); updateRoomDisplay();
       }
-
+      if (data.type === 'selectClass' && pid && lobbyPlayers[pid] && CLASS_DEFS[data.cls]) {
+        lobbyPlayers[pid].playerClass = data.cls;
+        broadcastLobbyState(); updateRoomDisplay();
+      }
       if (data.type === 'input' && pid && gameState && gameState.players[pid]) {
         const p = gameState.players[pid];
-        if (data.keys) {
-          p.input.up = !!data.keys.up;
-          p.input.down = !!data.keys.down;
-          p.input.left = !!data.keys.left;
-          p.input.right = !!data.keys.right;
-        }
+        if (data.keys) { p.input.up = !!data.keys.up; p.input.down = !!data.keys.down; p.input.left = !!data.keys.left; p.input.right = !!data.keys.right; }
         if (typeof data.angle === 'number') p.angle = data.angle;
         if (typeof data.shooting === 'boolean') p.shooting = data.shooting;
       }
-
-      if (data.type === 'reload' && pid && gameState && gameState.players[pid]) {
-        tryReload(gameState.players[pid], Date.now());
-      }
+      if (data.type === 'reload' && pid && gameState && gameState.players[pid]) tryReload(gameState.players[pid], Date.now());
+      if (data.type === 'ability' && pid && gameState && gameState.players[pid]) activateAbility(gameState.players[pid], pid, Date.now());
     });
-
     conn.on('close', () => {
       if (pid) {
-        delete lobbyPlayers[pid];
-        delete hostConns[pid];
-        if (gameState && gameState.players[pid]) delete gameState.players[pid];
-        broadcastLobbyState();
-        updateRoomDisplay();
+        delete lobbyPlayers[pid]; delete hostConns[pid];
+        if (gameState) {
+          if (gameState.players[pid]) delete gameState.players[pid];
+          gameState.turrets = gameState.turrets.filter(t => t.ownerId !== pid);
+          gameState.shieldWalls = gameState.shieldWalls.filter(s => s.ownerId !== pid);
+        }
+        broadcastLobbyState(); updateRoomDisplay();
       }
     });
   });
 
   peer.on('error', (err) => {
-    if (err.type === 'unavailable-id') {
-      peer.destroy();
-      createRoom();
-    } else {
-      setStatus(roomStatus, 'Error: ' + err.message, true);
-    }
+    if (err.type === 'unavailable-id') { peer.destroy(); createRoom(); }
+    else setStatus(roomStatus, 'Error: ' + err.message, true);
   });
 }
 
 function broadcastLobbyState() {
   const state = { type: 'lobbyState', roomCode, players: {}, hostId: '0' };
   for (const [id, p] of Object.entries(lobbyPlayers)) {
-    state.players[id] = { name: p.name, ready: p.ready, isHost: id === '0' };
+    state.players[id] = { name: p.name, ready: p.ready, isHost: id === '0', playerClass: p.playerClass };
   }
-  for (const conn of Object.values(hostConns)) {
-    try { conn.send(state); } catch(e) {}
-  }
+  for (const conn of Object.values(hostConns)) { try { conn.send(state); } catch(e) {} }
 }
 
 // ========================
@@ -318,86 +263,41 @@ function broadcastLobbyState() {
 // ========================
 function joinRoom(code) {
   code = code.toUpperCase().trim();
-  if (code.length !== 4) {
-    setStatus(joinStatus, 'Enter a 4-letter code', true);
-    return;
-  }
-
-  setStatus(joinStatus, 'Connecting...');
-  $('connectBtn').disabled = true;
-
+  if (code.length !== 4) { setStatus(joinStatus, 'Enter a 4-letter code', true); return; }
+  setStatus(joinStatus, 'Connecting...'); $('connectBtn').disabled = true;
   peer = new Peer(undefined, PEER_CONFIG);
 
   peer.on('open', () => {
     hostConn = peer.connect('shooter1-' + code, { reliable: true });
-
-    hostConn.on('open', () => {
-      hostConn.send({ type: 'join', name: myName });
-    });
-
+    hostConn.on('open', () => { hostConn.send({ type: 'join', name: myName }); });
     hostConn.on('data', (data) => {
       if (!data || !data.type) return;
-
       if (data.type === 'joined') {
-        myPlayerId = data.yourId;
-        roomCode = code;
-        roomCodeEl.textContent = code;
-        $('startGameBtn').style.display = 'none';
-        showScreen('room');
+        myPlayerId = data.yourId; roomCode = code; roomCodeEl.textContent = code;
+        $('startGameBtn').style.display = 'none'; showScreen('room');
       }
-
       if (data.type === 'lobbyState') {
         lobbyPlayers = {};
-        for (const [id, p] of Object.entries(data.players)) {
-          lobbyPlayers[id] = p;
-        }
+        for (const [id, p] of Object.entries(data.players)) lobbyPlayers[id] = p;
         updateRoomDisplay();
       }
-
-      if (data.type === 'gameStarted') {
-        startGameClient();
-      }
-
+      if (data.type === 'gameStarted') startGameClient();
       if (data.type === 'state') {
-        snapshot = {
-          players: data.players,
-          bullets: data.bullets,
-          pickups: data.pickups,
-          explosions: data.explosions,
-        };
-        // Process kill events
+        snapshot = { players: data.players, bullets: data.bullets, pickups: data.pickups, explosions: data.explosions, turrets: data.turrets, shieldWalls: data.shieldWalls };
         if (data.killEvents) {
           for (const ev of data.killEvents) {
-            killNotifications.push({
-              text: `${ev.killer} killed ${ev.victim}`,
-              time: Date.now(),
-              isMyKill: ev.killerId === myPlayerId,
-            });
+            killNotifications.push({ text: `${ev.killer} killed ${ev.victim}`, time: Date.now(), isMyKill: ev.killerId === myPlayerId });
           }
         }
       }
     });
-
-    hostConn.on('close', () => {
-      if (gameRunning || currentScreen === 'room') {
-        cleanupGame();
-        showScreen('start');
-        alert('Host disconnected');
-      }
-    });
-
-    hostConn.on('error', () => {
-      setStatus(joinStatus, 'Connection lost', true);
-    });
+    hostConn.on('close', () => { if (gameRunning || currentScreen === 'room') { cleanupGame(); showScreen('start'); alert('Host disconnected'); } });
+    hostConn.on('error', () => { setStatus(joinStatus, 'Connection lost', true); });
   });
 
   peer.on('error', (err) => {
     $('connectBtn').disabled = false;
-    if (err.type === 'peer-unavailable') {
-      setStatus(joinStatus, 'Room not found', true);
-    } else {
-      setStatus(joinStatus, 'Error: ' + err.message, true);
-    }
+    setStatus(joinStatus, err.type === 'peer-unavailable' ? 'Room not found' : 'Error: ' + err.message, true);
   });
 }
 
@@ -405,52 +305,52 @@ function joinRoom(code) {
 // LOBBY DISPLAY
 // ========================
 function updateRoomDisplay() {
-  playerListEl.innerHTML = Object.entries(lobbyPlayers).map(([id, p]) => `
-    <div class="player-entry">
+  playerListEl.innerHTML = Object.entries(lobbyPlayers).map(([id, p]) => {
+    const cls = CLASS_DEFS[p.playerClass || 'tank'];
+    return `<div class="player-entry">
       <span>
         <span class="pname">${escapeHtml(p.name)}</span>
+        <span class="class-badge">${cls.name}</span>
         ${(p.isHost || id === '0') ? '<span class="host-tag">HOST</span>' : ''}
       </span>
       <span class="ready-tag ${p.ready ? 'yes' : 'no'}">${p.ready ? 'Ready' : 'Not Ready'}</span>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // ========================
 // GAME SIMULATION (Host only)
 // ========================
 function initPlayer(id, x, y, colorIdx) {
+  const cls = CLASS_DEFS[lobbyPlayers[id].playerClass || 'tank'];
   return {
-    x, y, angle: 0, hp: MAX_HP, alive: true,
-    name: lobbyPlayers[id].name,
+    x, y, angle: 0, hp: cls.hp, maxHp: cls.hp, speed: cls.speed,
+    alive: true, name: lobbyPlayers[id].name,
     color: COLORS[colorIdx % COLORS.length],
+    playerClass: lobbyPlayers[id].playerClass || 'tank',
     kills: 0, deaths: 0,
     input: { up: false, down: false, left: false, right: false },
     shooting: false, lastShotTime: 0, respawnTimer: 0,
-    weapon: 'pistol',
-    ammo: WEAPONS.pistol.clip,
-    reserveAmmo: Infinity,
-    reloading: false,
-    reloadStart: 0,
-    ammoMod: null,
+    weapon: 'pistol', ammo: WEAPONS.pistol.clip, reserveAmmo: Infinity,
+    reloading: false, reloadStart: 0, ammoMod: null,
+    abilityCdStart: -99999,
+    cloaked: false, cloakEnd: 0,
+    dashing: false, dashEnd: 0,
   };
 }
 
 function createGameState() {
   const state = {
-    players: {},
-    bullets: [],
-    bulletIdCounter: 0,
-    pickups: PICKUP_DEFS.map((def, i) => ({ id: i, x: def.x, y: def.y, type: def.type, active: true, respawnTime: 0 })),
-    explosions: [],
-    killEvents: [],
+    players: {}, bullets: [], bulletIdCounter: 0,
+    pickups: PICKUP_DEFS.map((d, i) => ({ id: i, x: d.x, y: d.y, type: d.type, active: true, respawnTime: 0 })),
+    explosions: [], killEvents: [],
+    turrets: [], turretIdCounter: 0,
+    shieldWalls: [], shieldWallIdCounter: 0,
   };
   const ids = Object.keys(lobbyPlayers);
   ids.forEach((id, i) => {
-    const angle = (2 * Math.PI * i) / ids.length;
-    const sx = MAP_W / 2 + Math.cos(angle) * 300;
-    const sy = MAP_H / 2 + Math.sin(angle) * 300;
-    state.players[id] = initPlayer(id, sx, sy, i);
+    const a = (2 * Math.PI * i) / ids.length;
+    state.players[id] = initPlayer(id, MAP_W/2 + Math.cos(a)*300, MAP_H/2 + Math.sin(a)*300, i);
   });
   return state;
 }
@@ -460,31 +360,75 @@ function tryReload(p, now) {
   const wep = WEAPONS[p.weapon];
   if (p.ammo >= wep.clip) return;
   if (!wep.infinite && p.reserveAmmo <= 0) return;
-  p.reloading = true;
-  p.reloadStart = now;
+  p.reloading = true; p.reloadStart = now;
+}
+
+function activateAbility(p, id, now) {
+  const cls = CLASS_DEFS[p.playerClass];
+  if (!p.alive || now - p.abilityCdStart < cls.cooldown) return;
+  p.abilityCdStart = now;
+
+  switch (p.playerClass) {
+    case 'tank': {
+      const dist = 55;
+      const cx = p.x + Math.cos(p.angle) * dist, cy = p.y + Math.sin(p.angle) * dist;
+      const horiz = Math.abs(Math.cos(p.angle)) >= Math.abs(Math.sin(p.angle));
+      const ww = horiz ? 16 : 100, wh = horiz ? 100 : 16;
+      gameState.shieldWalls.push({
+        id: gameState.shieldWallIdCounter++,
+        x: Math.max(0, Math.min(MAP_W - ww, cx - ww/2)),
+        y: Math.max(0, Math.min(MAP_H - wh, cy - wh/2)),
+        w: ww, h: wh, ownerId: id, createdAt: now, duration: SHIELD_DURATION,
+      });
+      break;
+    }
+    case 'scout': {
+      const steps = 15, stepD = DASH_DIST / steps;
+      const walls = getAllWalls();
+      for (let s = 0; s < steps; s++) {
+        const tx = p.x + Math.cos(p.angle) * stepD, ty = p.y + Math.sin(p.angle) * stepD;
+        let blocked = false;
+        for (const w of walls) { if (circleRectOverlap(tx, ty, PLAYER_R, w)) { blocked = true; break; } }
+        if (blocked) break;
+        p.x = tx; p.y = ty;
+      }
+      p.x = Math.max(PLAYER_R, Math.min(MAP_W - PLAYER_R, p.x));
+      p.y = Math.max(PLAYER_R, Math.min(MAP_H - PLAYER_R, p.y));
+      p.dashing = true; p.dashEnd = now + DASH_INVULN;
+      break;
+    }
+    case 'engineer': {
+      gameState.turrets = gameState.turrets.filter(t => t.ownerId !== id);
+      gameState.turrets.push({
+        id: gameState.turretIdCounter++,
+        x: p.x, y: p.y, hp: TURRET_HP, maxHp: TURRET_HP,
+        ownerId: id, ownerColor: p.color,
+        angle: p.angle, lastShotTime: 0, createdAt: now, duration: TURRET_DURATION,
+      });
+      break;
+    }
+    case 'ghost': {
+      p.cloaked = true; p.cloakEnd = now + CLOAK_DURATION;
+      break;
+    }
+  }
 }
 
 function resolvePlayerWalls(p) {
-  for (const wall of WALLS) {
-    const nx = Math.max(wall.x, Math.min(p.x, wall.x + wall.w));
-    const ny = Math.max(wall.y, Math.min(p.y, wall.y + wall.h));
-    const dx = p.x - nx, dy = p.y - ny;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+  const walls = getAllWalls();
+  for (const wall of walls) {
+    const nx = Math.max(wall.x, Math.min(p.x, wall.x+wall.w));
+    const ny = Math.max(wall.y, Math.min(p.y, wall.y+wall.h));
+    const dx = p.x-nx, dy = p.y-ny;
+    const dist = Math.sqrt(dx*dx + dy*dy);
     if (dist < PLAYER_R && dist > 0.001) {
-      const overlap = PLAYER_R - dist;
-      p.x += (dx / dist) * overlap;
-      p.y += (dy / dist) * overlap;
+      const ov = PLAYER_R - dist;
+      p.x += (dx/dist)*ov; p.y += (dy/dist)*ov;
     } else if (dist < 0.001) {
-      // Player center inside wall — push to nearest edge
-      const toLeft = p.x - wall.x;
-      const toRight = (wall.x + wall.w) - p.x;
-      const toTop = p.y - wall.y;
-      const toBottom = (wall.y + wall.h) - p.y;
-      const minD = Math.min(toLeft, toRight, toTop, toBottom);
-      if (minD === toLeft) p.x = wall.x - PLAYER_R;
-      else if (minD === toRight) p.x = wall.x + wall.w + PLAYER_R;
-      else if (minD === toTop) p.y = wall.y - PLAYER_R;
-      else p.y = wall.y + wall.h + PLAYER_R;
+      const tL = p.x-wall.x, tR = wall.x+wall.w-p.x, tT = p.y-wall.y, tB = wall.y+wall.h-p.y;
+      const m = Math.min(tL, tR, tT, tB);
+      if (m===tL) p.x=wall.x-PLAYER_R; else if (m===tR) p.x=wall.x+wall.w+PLAYER_R;
+      else if (m===tT) p.y=wall.y-PLAYER_R; else p.y=wall.y+wall.h+PLAYER_R;
     }
   }
 }
@@ -494,70 +438,77 @@ function triggerExplosion(x, y, ownerId, now) {
   for (const pid in gameState.players) {
     const p = gameState.players[pid];
     if (!p.alive) continue;
-    const dx = p.x - x, dy = p.y - y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (p.dashing && now < p.dashEnd) continue;
+    const dx = p.x-x, dy = p.y-y, dist = Math.sqrt(dx*dx+dy*dy);
     if (dist < EXPLOSION_RADIUS) {
-      const dmg = Math.round(EXPLOSION_DMG * (1 - dist / EXPLOSION_RADIUS));
-      p.hp -= dmg;
+      p.hp -= Math.round(EXPLOSION_DMG * (1 - dist/EXPLOSION_RADIUS));
       if (p.hp <= 0 && p.alive) {
-        p.alive = false;
-        p.deaths++;
-        p.respawnTimer = now + RESPAWN_TIME;
-        resetPlayerWeapon(p);
-        if (ownerId && gameState.players[ownerId] && ownerId !== pid) {
-          gameState.players[ownerId].kills++;
-          gameState.killEvents.push({
-            killerId: ownerId,
-            killer: gameState.players[ownerId].name,
-            victim: p.name,
-            weapon: 'explosive',
-          });
-        }
+        killPlayer(p, pid, ownerId, 'explosive', now);
       }
     }
   }
 }
 
+function killPlayer(p, pid, killerId, weapon, now) {
+  p.alive = false; p.deaths++; p.respawnTimer = now + RESPAWN_TIME;
+  p.cloaked = false; p.dashing = false;
+  resetPlayerWeapon(p);
+  if (killerId && gameState.players[killerId] && killerId !== pid) {
+    gameState.players[killerId].kills++;
+    gameState.killEvents.push({ killerId, killer: gameState.players[killerId].name, victim: p.name, weapon });
+  }
+}
+
 function resetPlayerWeapon(p) {
-  p.weapon = 'pistol';
-  p.ammo = WEAPONS.pistol.clip;
-  p.reserveAmmo = Infinity;
-  p.reloading = false;
-  p.ammoMod = null;
+  p.weapon = 'pistol'; p.ammo = WEAPONS.pistol.clip; p.reserveAmmo = Infinity;
+  p.reloading = false; p.ammoMod = null;
 }
 
 function applyPickup(p, pickup) {
   switch (pickup.type) {
-    case 'health':
-      p.hp = Math.min(MAX_HP, p.hp + 50);
-      break;
+    case 'health': p.hp = Math.min(p.maxHp, p.hp + 50); break;
     case 'shotgun': case 'smg': case 'sniper':
-      if (p.weapon === pickup.type) {
-        p.reserveAmmo = WEAPONS[pickup.type].reserveAmmo;
-      } else {
-        p.weapon = pickup.type;
-        p.ammo = WEAPONS[pickup.type].clip;
-        p.reserveAmmo = WEAPONS[pickup.type].reserveAmmo;
-        p.reloading = false;
-        p.ammoMod = null;
-      }
+      if (p.weapon === pickup.type) { p.reserveAmmo = WEAPONS[pickup.type].reserveAmmo; }
+      else { p.weapon = pickup.type; p.ammo = WEAPONS[pickup.type].clip; p.reserveAmmo = WEAPONS[pickup.type].reserveAmmo; p.reloading = false; p.ammoMod = null; }
       break;
-    case 'piercing': case 'explosive':
-      p.ammoMod = pickup.type;
-      break;
+    case 'piercing': case 'explosive': p.ammoMod = pickup.type; break;
   }
 }
 
 function updateGame() {
   const now = Date.now();
   gameState.killEvents = [];
-
-  // Clean old explosions
   gameState.explosions = gameState.explosions.filter(e => now - e.time < EXPLOSION_DURATION);
 
+  // Expire shield walls
+  gameState.shieldWalls = gameState.shieldWalls.filter(sw => now - sw.createdAt < sw.duration);
+
   // Respawn pickups
-  for (const pk of gameState.pickups) {
-    if (!pk.active && now >= pk.respawnTime) pk.active = true;
+  for (const pk of gameState.pickups) { if (!pk.active && now >= pk.respawnTime) pk.active = true; }
+
+  // Update turrets
+  for (let i = gameState.turrets.length - 1; i >= 0; i--) {
+    const t = gameState.turrets[i];
+    if (now - t.createdAt > t.duration || t.hp <= 0) { gameState.turrets.splice(i, 1); continue; }
+    let nearest = null, nearDist = TURRET_RANGE;
+    for (const [pid, pp] of Object.entries(gameState.players)) {
+      if (pid === t.ownerId || !pp.alive || pp.cloaked) continue;
+      const d = Math.sqrt((pp.x-t.x)**2 + (pp.y-t.y)**2);
+      if (d < nearDist) { nearDist = d; nearest = pp; }
+    }
+    if (nearest) {
+      t.angle = Math.atan2(nearest.y - t.y, nearest.x - t.x);
+      if (now - t.lastShotTime > TURRET_FIRE_RATE) {
+        t.lastShotTime = now;
+        const sa = t.angle + (Math.random()-0.5) * 0.04;
+        gameState.bullets.push({
+          id: gameState.bulletIdCounter++, ownerId: t.ownerId,
+          x: t.x + Math.cos(t.angle)*15, y: t.y + Math.sin(t.angle)*15,
+          vx: Math.cos(sa)*WEAPONS.turret.speed, vy: Math.sin(sa)*WEAPONS.turret.speed,
+          createdAt: now, weapon: 'turret', bounces: 0, pierce: false, ammoMod: null, hitPlayers: [],
+        });
+      }
+    }
   }
 
   // Update players
@@ -566,126 +517,97 @@ function updateGame() {
     if (!p.alive) {
       if (p.respawnTimer && now >= p.respawnTimer) {
         const sp = safeSpawnPos();
-        p.x = sp.x; p.y = sp.y;
-        p.hp = MAX_HP; p.alive = true; p.respawnTimer = 0;
+        p.x = sp.x; p.y = sp.y; p.hp = p.maxHp; p.alive = true; p.respawnTimer = 0;
         resetPlayerWeapon(p);
+        p.cloaked = false; p.dashing = false;
+        p.abilityCdStart = -99999;
       }
       continue;
     }
+
+    // Expire cloak
+    if (p.cloaked && now >= p.cloakEnd) p.cloaked = false;
+    // Expire dash invuln
+    if (p.dashing && now >= p.dashEnd) p.dashing = false;
 
     // Reload
     if (p.reloading) {
       const wep = WEAPONS[p.weapon];
       if (now - p.reloadStart >= wep.reloadTime) {
         p.reloading = false;
-        if (wep.infinite) {
-          p.ammo = wep.clip;
-        } else {
-          const needed = wep.clip - p.ammo;
-          const avail = Math.min(needed, p.reserveAmmo);
-          p.ammo += avail;
-          p.reserveAmmo -= avail;
-        }
-        p.ammoMod = null; // mod expires on reload
+        if (wep.infinite) { p.ammo = wep.clip; }
+        else { const n = Math.min(wep.clip - p.ammo, p.reserveAmmo); p.ammo += n; p.reserveAmmo -= n; }
+        p.ammoMod = null;
       }
     }
 
     // Movement
     let dx = 0, dy = 0;
-    if (p.input.up) dy -= 1;
-    if (p.input.down) dy += 1;
-    if (p.input.left) dx -= 1;
-    if (p.input.right) dx += 1;
+    if (p.input.up) dy -= 1; if (p.input.down) dy += 1;
+    if (p.input.left) dx -= 1; if (p.input.right) dx += 1;
     if (dx || dy) {
-      const len = Math.sqrt(dx * dx + dy * dy);
-      dx = (dx / len) * PLAYER_SPEED;
-      dy = (dy / len) * PLAYER_SPEED;
-      p.x += dx;
-      p.y += dy;
+      const len = Math.sqrt(dx*dx + dy*dy);
+      dx = (dx/len) * p.speed; dy = (dy/len) * p.speed;
+      p.x += dx; p.y += dy;
     }
-    // Wall collision
     resolvePlayerWalls(p);
-    // Map bounds
     p.x = Math.max(PLAYER_R, Math.min(MAP_W - PLAYER_R, p.x));
     p.y = Math.max(PLAYER_R, Math.min(MAP_H - PLAYER_R, p.y));
 
-    // Shooting
+    // Shooting (breaks cloak)
     const wep = WEAPONS[p.weapon];
     if (p.shooting && !p.reloading && p.ammo > 0 && now - p.lastShotTime >= wep.cooldown) {
+      if (p.cloaked) p.cloaked = false;
       p.lastShotTime = now;
       for (let j = 0; j < wep.projectiles; j++) {
-        const spreadAngle = p.angle + (wep.spread > 0 ? (Math.random() - 0.5) * wep.spread * 2 : 0);
+        const sa = p.angle + (wep.spread > 0 ? (Math.random()-0.5)*wep.spread*2 : 0);
         gameState.bullets.push({
-          id: gameState.bulletIdCounter++,
-          ownerId: id,
-          x: p.x + Math.cos(p.angle) * (PLAYER_R + 8),
-          y: p.y + Math.sin(p.angle) * (PLAYER_R + 8),
-          vx: Math.cos(spreadAngle) * wep.speed,
-          vy: Math.sin(spreadAngle) * wep.speed,
-          createdAt: now,
-          weapon: p.weapon,
-          bounces: wep.bounces,
-          pierce: !!wep.pierce || p.ammoMod === 'piercing',
-          ammoMod: p.ammoMod,
-          hitPlayers: [],
+          id: gameState.bulletIdCounter++, ownerId: id,
+          x: p.x + Math.cos(p.angle)*(PLAYER_R+8), y: p.y + Math.sin(p.angle)*(PLAYER_R+8),
+          vx: Math.cos(sa)*wep.speed, vy: Math.sin(sa)*wep.speed,
+          createdAt: now, weapon: p.weapon, bounces: wep.bounces,
+          pierce: !!wep.pierce || p.ammoMod === 'piercing', ammoMod: p.ammoMod, hitPlayers: [],
         });
       }
       p.ammo--;
       if (p.ammo <= 0) {
-        if (wep.infinite || p.reserveAmmo > 0) {
-          p.reloading = true;
-          p.reloadStart = now;
-        } else {
-          resetPlayerWeapon(p);
-        }
+        if (wep.infinite || p.reserveAmmo > 0) { p.reloading = true; p.reloadStart = now; }
+        else resetPlayerWeapon(p);
       }
     }
 
     // Pickup collection
     for (const pk of gameState.pickups) {
       if (!pk.active) continue;
-      const pdx = p.x - pk.x, pdy = p.y - pk.y;
-      if (Math.sqrt(pdx * pdx + pdy * pdy) < PICKUP_RADIUS + PLAYER_R) {
-        applyPickup(p, pk);
-        pk.active = false;
-        pk.respawnTime = now + PICKUP_RESPAWN;
-        break;
+      if (Math.sqrt((p.x-pk.x)**2 + (p.y-pk.y)**2) < PICKUP_RADIUS + PLAYER_R) {
+        applyPickup(p, pk); pk.active = false; pk.respawnTime = now + PICKUP_RESPAWN; break;
       }
     }
   }
 
   // Update bullets
+  const allWalls = getAllWalls();
   for (let i = gameState.bullets.length - 1; i >= 0; i--) {
     const b = gameState.bullets[i];
-    b.x += b.vx;
-    b.y += b.vy;
+    b.x += b.vx; b.y += b.vy;
 
-    // Out of bounds / lifetime
     if (b.x < 0 || b.x > MAP_W || b.y < 0 || b.y > MAP_H || now - b.createdAt > WEAPONS[b.weapon].lifetime) {
-      gameState.bullets.splice(i, 1);
-      continue;
+      gameState.bullets.splice(i, 1); continue;
     }
 
     // Wall collision
     let hitWall = false;
-    for (const wall of WALLS) {
+    for (const wall of allWalls) {
       if (pointInRect(b.x, b.y, wall)) {
         if (b.bounces > 0) {
           b.bounces--;
-          const oL = b.x - wall.x, oR = (wall.x + wall.w) - b.x;
-          const oT = b.y - wall.y, oB = (wall.y + wall.h) - b.y;
-          const minO = Math.min(oL, oR, oT, oB);
-          if (minO === oL || minO === oR) {
-            b.vx = -b.vx;
-            b.x = minO === oL ? wall.x - 1 : wall.x + wall.w + 1;
-          } else {
-            b.vy = -b.vy;
-            b.y = minO === oT ? wall.y - 1 : wall.y + wall.h + 1;
-          }
+          const oL = b.x-wall.x, oR = wall.x+wall.w-b.x, oT = b.y-wall.y, oB = wall.y+wall.h-b.y;
+          const m = Math.min(oL, oR, oT, oB);
+          if (m===oL||m===oR) { b.vx=-b.vx; b.x = m===oL ? wall.x-1 : wall.x+wall.w+1; }
+          else { b.vy=-b.vy; b.y = m===oT ? wall.y-1 : wall.y+wall.h+1; }
         } else {
           if (b.ammoMod === 'explosive') triggerExplosion(b.x, b.y, b.ownerId, now);
-          gameState.bullets.splice(i, 1);
-          hitWall = true;
+          gameState.bullets.splice(i, 1); hitWall = true;
         }
         break;
       }
@@ -695,42 +617,30 @@ function updateGame() {
     // Player collision
     let removed = false;
     for (const pid in gameState.players) {
-      if (pid === b.ownerId) continue;
-      if (b.hitPlayers.includes(pid)) continue;
+      if (pid === b.ownerId || b.hitPlayers.includes(pid)) continue;
       const p = gameState.players[pid];
       if (!p.alive) continue;
-      const ddx = p.x - b.x, ddy = p.y - b.y;
-      if (Math.sqrt(ddx * ddx + ddy * ddy) < PLAYER_R + BULLET_R) {
-        const wep = WEAPONS[b.weapon];
-        p.hp -= wep.damage;
-        if (b.ammoMod === 'explosive') {
-          triggerExplosion(b.x, b.y, b.ownerId, now);
-        }
-        if (p.hp <= 0 && p.alive) {
-          p.alive = false;
-          p.deaths++;
-          p.respawnTimer = now + RESPAWN_TIME;
-          resetPlayerWeapon(p);
-          if (gameState.players[b.ownerId]) {
-            gameState.players[b.ownerId].kills++;
-            gameState.killEvents.push({
-              killerId: b.ownerId,
-              killer: gameState.players[b.ownerId].name,
-              victim: p.name,
-              weapon: b.weapon,
-            });
-          }
-        }
-        if (b.pierce) {
-          b.hitPlayers.push(pid);
-        } else {
-          gameState.bullets.splice(i, 1);
-          removed = true;
-        }
+      if (p.dashing && now < p.dashEnd) continue;
+      if (Math.sqrt((p.x-b.x)**2 + (p.y-b.y)**2) < PLAYER_R + BULLET_R) {
+        p.hp -= WEAPONS[b.weapon].damage;
+        if (b.ammoMod === 'explosive') triggerExplosion(b.x, b.y, b.ownerId, now);
+        if (p.hp <= 0 && p.alive) killPlayer(p, pid, b.ownerId, b.weapon, now);
+        if (b.pierce) { b.hitPlayers.push(pid); } else { gameState.bullets.splice(i, 1); removed = true; }
         break;
       }
     }
     if (removed) continue;
+
+    // Turret collision
+    for (const t of gameState.turrets) {
+      if (b.ownerId === t.ownerId) continue;
+      if (Math.sqrt((t.x-b.x)**2 + (t.y-b.y)**2) < TURRET_R + BULLET_R) {
+        t.hp -= WEAPONS[b.weapon].damage;
+        if (b.ammoMod === 'explosive') triggerExplosion(b.x, b.y, b.ownerId, now);
+        if (!b.pierce) { gameState.bullets.splice(i, 1); removed = true; }
+        break;
+      }
+    }
   }
 }
 
@@ -738,17 +648,23 @@ function getSnapshot() {
   const now = Date.now();
   const players = {};
   for (const [id, p] of Object.entries(gameState.players)) {
+    const cls = CLASS_DEFS[p.playerClass];
+    const cdElapsed = now - p.abilityCdStart;
     players[id] = {
       x: p.x, y: p.y, angle: p.angle,
-      hp: p.hp, alive: p.alive,
+      hp: p.hp, maxHp: p.maxHp, alive: p.alive,
       name: p.name, color: p.color,
+      playerClass: p.playerClass,
       kills: p.kills, deaths: p.deaths,
-      weapon: p.weapon,
-      ammo: p.ammo,
+      weapon: p.weapon, ammo: p.ammo,
       reserveAmmo: p.reserveAmmo === Infinity ? -1 : p.reserveAmmo,
       reloading: p.reloading,
       reloadPct: p.reloading ? Math.min(1, (now - p.reloadStart) / WEAPONS[p.weapon].reloadTime) : 0,
       ammoMod: p.ammoMod,
+      abilityReady: cdElapsed >= cls.cooldown,
+      abilityCdPct: Math.min(1, cdElapsed / cls.cooldown),
+      cloaked: p.cloaked,
+      dashing: p.dashing,
     };
   }
   return {
@@ -756,6 +672,8 @@ function getSnapshot() {
     bullets: gameState.bullets.map(b => ({ id: b.id, x: b.x, y: b.y, ownerId: b.ownerId, weapon: b.weapon, ammoMod: b.ammoMod })),
     pickups: gameState.pickups.map(p => ({ id: p.id, x: p.x, y: p.y, type: p.type, active: p.active })),
     explosions: gameState.explosions.map(e => ({ x: e.x, y: e.y, age: now - e.time })),
+    turrets: gameState.turrets.map(t => ({ id: t.id, x: t.x, y: t.y, hp: t.hp, maxHp: t.maxHp, ownerId: t.ownerId, ownerColor: t.ownerColor, angle: t.angle })),
+    shieldWalls: gameState.shieldWalls.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, ownerId: s.ownerId })),
     killEvents: gameState.killEvents,
   };
 }
@@ -765,59 +683,35 @@ function getSnapshot() {
 // ========================
 function startGameHost() {
   gameState = createGameState();
-  gameRunning = true;
-  killNotifications = [];
-
-  for (const conn of Object.values(hostConns)) {
-    try { conn.send({ type: 'gameStarted' }); } catch(e) {}
-  }
+  gameRunning = true; killNotifications = [];
+  for (const conn of Object.values(hostConns)) { try { conn.send({ type: 'gameStarted' }); } catch(e) {} }
 
   gameLoopInterval = setInterval(() => {
     const me = gameState.players['0'];
     if (me) {
       me.input = { ...keys };
-      me.angle = Math.atan2(mouseY - canvas.height / 2, mouseX - canvas.width / 2);
+      me.angle = Math.atan2(mouseY - canvas.height/2, mouseX - canvas.width/2);
       me.shooting = mouseDown;
     }
-
     updateGame();
     snapshot = getSnapshot();
-
-    // Host processes kill events locally
     if (snapshot.killEvents) {
-      for (const ev of snapshot.killEvents) {
-        killNotifications.push({ text: `${ev.killer} killed ${ev.victim}`, time: Date.now(), isMyKill: ev.killerId === '0' });
-      }
+      for (const ev of snapshot.killEvents) killNotifications.push({ text: `${ev.killer} killed ${ev.victim}`, time: Date.now(), isMyKill: ev.killerId === '0' });
     }
-
     const msg = { type: 'state', ...snapshot };
-    for (const conn of Object.values(hostConns)) {
-      try { conn.send(msg); } catch(e) {}
-    }
+    for (const conn of Object.values(hostConns)) { try { conn.send(msg); } catch(e) {} }
   }, 1000 / TICK_RATE);
 
-  showScreen('game');
-  resizeCanvas();
-  requestAnimationFrame(renderLoop);
+  showScreen('game'); resizeCanvas(); requestAnimationFrame(renderLoop);
 }
 
 function startGameClient() {
-  gameRunning = true;
-  killNotifications = [];
-
+  gameRunning = true; killNotifications = [];
   inputInterval = setInterval(() => {
     if (!hostConn || !hostConn.open) return;
-    hostConn.send({
-      type: 'input',
-      keys: { ...keys },
-      angle: Math.atan2(mouseY - canvas.height / 2, mouseX - canvas.width / 2),
-      shooting: mouseDown,
-    });
+    hostConn.send({ type: 'input', keys: { ...keys }, angle: Math.atan2(mouseY - canvas.height/2, mouseX - canvas.width/2), shooting: mouseDown });
   }, 1000 / TICK_RATE);
-
-  showScreen('game');
-  resizeCanvas();
-  requestAnimationFrame(renderLoop);
+  showScreen('game'); resizeCanvas(); requestAnimationFrame(renderLoop);
 }
 
 function cleanupGame() {
@@ -827,12 +721,9 @@ function cleanupGame() {
   for (const conn of Object.values(hostConns)) { try { conn.close(); } catch(e) {} }
   if (hostConn) { try { hostConn.close(); } catch(e) {} }
   if (peer) { try { peer.destroy(); } catch(e) {} }
-  hostConns = {}; lobbyPlayers = {};
-  gameState = null; snapshot = null;
-  hostConn = null; peer = null;
-  myPlayerId = null; isHost = false; nextPlayerId = 1;
-  keys = { up: false, down: false, left: false, right: false };
-  mouseDown = false;
+  hostConns = {}; lobbyPlayers = {}; gameState = null; snapshot = null;
+  hostConn = null; peer = null; myPlayerId = null; isHost = false; nextPlayerId = 1;
+  keys = { up: false, down: false, left: false, right: false }; mouseDown = false;
   killNotifications = [];
 }
 
@@ -847,25 +738,22 @@ window.addEventListener('keydown', (e) => {
     case 'a': keys.left = true; break;
     case 'd': keys.right = true; break;
     case 'r':
-      if (isHost && gameState) {
-        const me = gameState.players['0'];
-        if (me && me.alive) tryReload(me, Date.now());
-      } else if (hostConn && hostConn.open) {
-        hostConn.send({ type: 'reload' });
-      }
+      if (isHost && gameState) { const me = gameState.players['0']; if (me && me.alive) tryReload(me, Date.now()); }
+      else if (hostConn && hostConn.open) hostConn.send({ type: 'reload' });
+      break;
+    case ' ':
+      e.preventDefault();
+      if (isHost && gameState) { const me = gameState.players['0']; if (me) activateAbility(me, '0', Date.now()); }
+      else if (hostConn && hostConn.open) hostConn.send({ type: 'ability' });
       break;
   }
 });
-
 window.addEventListener('keyup', (e) => {
   switch (e.key.toLowerCase()) {
-    case 'w': keys.up = false; break;
-    case 's': keys.down = false; break;
-    case 'a': keys.left = false; break;
-    case 'd': keys.right = false; break;
+    case 'w': keys.up = false; break; case 's': keys.down = false; break;
+    case 'a': keys.left = false; break; case 'd': keys.right = false; break;
   }
 });
-
 window.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
 window.addEventListener('mousedown', (e) => { if (currentScreen === 'game' && e.button === 0) mouseDown = true; });
 window.addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; });
@@ -874,62 +762,48 @@ window.addEventListener('contextmenu', (e) => { if (currentScreen === 'game') e.
 // ========================
 // RENDERING
 // ========================
-function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  mmCanvas.width = 140;
-  mmCanvas.height = 140;
-}
+function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; mmCanvas.width = 140; mmCanvas.height = 140; }
 window.addEventListener('resize', resizeCanvas);
 
-function renderLoop() {
-  if (!gameRunning) return;
-  render();
-  renderMinimap();
-  renderHUD();
-  requestAnimationFrame(renderLoop);
-}
+function renderLoop() { if (!gameRunning) return; render(); renderMinimap(); renderHUD(); requestAnimationFrame(renderLoop); }
 
 function render() {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
   if (!snapshot) return;
-
   const me = snapshot.players[myPlayerId];
   if (!me) return;
+  camera.x = me.x - W/2; camera.y = me.y - H/2;
 
-  camera.x = me.x - W / 2;
-  camera.y = me.y - H / 2;
-
-  // Background
-  ctx.fillStyle = '#111122';
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#111122'; ctx.fillRect(0, 0, W, H);
 
   // Grid
-  ctx.strokeStyle = '#1a1a35';
-  ctx.lineWidth = 1;
-  const gs = 50;
-  for (let x = -(camera.x % gs); x < W; x += gs) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-  }
-  for (let y = -(camera.y % gs); y < H; y += gs) {
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-  }
+  ctx.strokeStyle = '#1a1a35'; ctx.lineWidth = 1;
+  for (let x = -(camera.x % 50); x < W; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = -(camera.y % 50); y < H; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
 
-  // Map border
-  ctx.strokeStyle = '#e74c3c';
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 3;
   ctx.strokeRect(-camera.x, -camera.y, MAP_W, MAP_H);
 
   // Walls
   for (const wall of WALLS) {
     const wx = wall.x - camera.x, wy = wall.y - camera.y;
-    if (wx + wall.w < -10 || wx > W + 10 || wy + wall.h < -10 || wy > H + 10) continue;
-    ctx.fillStyle = '#2a2a45';
-    ctx.fillRect(wx, wy, wall.w, wall.h);
-    ctx.strokeStyle = '#3d3d5c';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(wx, wy, wall.w, wall.h);
+    if (wx+wall.w < -10 || wx > W+10 || wy+wall.h < -10 || wy > H+10) continue;
+    ctx.fillStyle = '#2a2a45'; ctx.fillRect(wx, wy, wall.w, wall.h);
+    ctx.strokeStyle = '#3d3d5c'; ctx.lineWidth = 2; ctx.strokeRect(wx, wy, wall.w, wall.h);
+  }
+
+  // Shield walls
+  if (snapshot.shieldWalls) {
+    for (const sw of snapshot.shieldWalls) {
+      const sx = sw.x - camera.x, sy = sw.y - camera.y;
+      if (sx+sw.w < -10 || sx > W+10 || sy+sw.h < -10 || sy > H+10) continue;
+      const pulse = 0.3 + Math.sin(Date.now()/200) * 0.1;
+      ctx.fillStyle = `rgba(52, 152, 219, ${pulse})`;
+      ctx.fillRect(sx, sy, sw.w, sw.h);
+      ctx.strokeStyle = 'rgba(52, 152, 219, 0.8)';
+      ctx.lineWidth = 2; ctx.strokeRect(sx, sy, sw.w, sw.h);
+    }
   }
 
   // Pickups
@@ -938,7 +812,7 @@ function render() {
     for (const pk of snapshot.pickups) {
       if (!pk.active) continue;
       const sx = pk.x - camera.x, sy = pk.y - camera.y + Math.sin(bobT + pk.id) * 3;
-      if (sx < -30 || sx > W + 30 || sy < -30 || sy > H + 30) continue;
+      if (sx < -30 || sx > W+30 || sy < -30 || sy > H+30) continue;
       renderPickup(sx, sy, pk.type);
     }
   }
@@ -947,104 +821,103 @@ function render() {
   if (snapshot.explosions) {
     for (const e of snapshot.explosions) {
       const sx = e.x - camera.x, sy = e.y - camera.y;
-      if (sx < -80 || sx > W + 80 || sy < -80 || sy > H + 80) continue;
+      if (sx < -80 || sx > W+80 || sy < -80 || sy > H+80) continue;
       const pct = Math.min(1, e.age / EXPLOSION_DURATION);
-      const radius = 10 + 50 * pct;
-      const alpha = (1 - pct) * 0.6;
-      ctx.fillStyle = `rgba(255, 150, 0, ${alpha})`;
-      ctx.beginPath();
-      ctx.arc(sx, sy, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = `rgba(255, 220, 50, ${alpha})`;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      if (e.age < 100) {
-        ctx.fillStyle = `rgba(255, 255, 200, ${(1 - e.age / 100) * 0.7})`;
-        ctx.beginPath();
-        ctx.arc(sx, sy, 15, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      const r = 10 + 50 * pct, a = (1-pct) * 0.6;
+      ctx.fillStyle = `rgba(255,150,0,${a})`; ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = `rgba(255,220,50,${a})`; ctx.lineWidth = 2; ctx.stroke();
+      if (e.age < 100) { ctx.fillStyle = `rgba(255,255,200,${(1-e.age/100)*0.7})`; ctx.beginPath(); ctx.arc(sx, sy, 15, 0, Math.PI*2); ctx.fill(); }
+    }
+  }
+
+  // Turrets
+  if (snapshot.turrets) {
+    for (const t of snapshot.turrets) {
+      const sx = t.x - camera.x, sy = t.y - camera.y;
+      if (sx < -30 || sx > W+30 || sy < -30 || sy > H+30) continue;
+      ctx.fillStyle = '#444'; ctx.beginPath(); ctx.arc(sx, sy, TURRET_R, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = t.ownerColor || '#ff9f43'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = t.ownerColor || '#ff9f43'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + Math.cos(t.angle)*18, sy + Math.sin(t.angle)*18); ctx.stroke();
+      const hp = t.hp / t.maxHp;
+      ctx.fillStyle = '#333'; ctx.fillRect(sx-12, sy-18, 24, 3);
+      ctx.fillStyle = hp > 0.5 ? '#2ecc71' : '#e74c3c'; ctx.fillRect(sx-12, sy-18, 24*hp, 3);
     }
   }
 
   // Bullets
   for (const b of snapshot.bullets) {
     const sx = b.x - camera.x, sy = b.y - camera.y;
-    if (sx < -10 || sx > W + 10 || sy < -10 || sy > H + 10) continue;
-    const style = getBulletStyle(b);
-    ctx.fillStyle = style.color;
-    ctx.shadowColor = style.color;
-    ctx.shadowBlur = style.glow;
-    ctx.beginPath();
-    ctx.arc(sx, sy, style.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
+    if (sx < -10 || sx > W+10 || sy < -10 || sy > H+10) continue;
+    const st = getBulletStyle(b);
+    ctx.fillStyle = st.color; ctx.shadowColor = st.color; ctx.shadowBlur = st.glow;
+    ctx.beginPath(); ctx.arc(sx, sy, st.radius, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
   }
 
   // Players
   for (const [id, p] of Object.entries(snapshot.players)) {
     if (!p.alive) continue;
     const sx = p.x - camera.x, sy = p.y - camera.y;
-    if (sx < -50 || sx > W + 50 || sy < -50 || sy > H + 50) continue;
+    if (sx < -50 || sx > W+50 || sy < -50 || sy > H+50) continue;
     const isMe = id === myPlayerId;
 
-    // Body
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(sx, sy, PLAYER_R, 0, Math.PI * 2);
-    ctx.fill();
-
-    if (isMe) {
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(sx, sy, PLAYER_R + 2, 0, Math.PI * 2);
-      ctx.stroke();
+    // Cloak handling
+    if (p.cloaked) {
+      ctx.globalAlpha = isMe ? 0.3 : 0.05;
+      if (!isMe && ctx.globalAlpha < 0.06) { ctx.globalAlpha = 1; continue; } // barely visible to enemies
     }
 
-    // Gun barrel — color varies by weapon
-    const wepColors = { pistol: '#ccc', shotgun: '#ff6b35', smg: '#ffd700', sniper: '#00ffff' };
-    ctx.strokeStyle = wepColors[p.weapon] || '#ccc';
-    ctx.lineWidth = p.weapon === 'sniper' ? 3 : 5;
-    ctx.lineCap = 'round';
-    const barrelLen = p.weapon === 'sniper' ? PLAYER_R + 18 : PLAYER_R + 12;
-    ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(sx + Math.cos(p.angle) * barrelLen, sy + Math.sin(p.angle) * barrelLen);
-    ctx.stroke();
+    // Dash visual
+    if (p.dashing) {
+      ctx.globalAlpha = Math.max(ctx.globalAlpha, 0.4);
+      ctx.strokeStyle = p.color; ctx.lineWidth = 1;
+      for (let d = 1; d <= 3; d++) {
+        ctx.globalAlpha *= 0.5;
+        ctx.beginPath(); ctx.arc(sx - Math.cos(p.angle)*d*12, sy - Math.sin(p.angle)*d*12, PLAYER_R, 0, Math.PI*2); ctx.stroke();
+      }
+      ctx.globalAlpha = p.cloaked ? (isMe ? 0.3 : 0.05) : 1;
+    }
 
-    // Name
-    ctx.fillStyle = '#fff';
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(p.name, sx, sy - PLAYER_R - 10);
+    // Body
+    ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(sx, sy, PLAYER_R, 0, Math.PI*2); ctx.fill();
+    if (isMe) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx, sy, PLAYER_R+2, 0, Math.PI*2); ctx.stroke(); }
+
+    // Gun barrel
+    const wepColors = { pistol: '#ccc', shotgun: '#ff6b35', smg: '#ffd700', sniper: '#00ffff', turret: '#ff9f43' };
+    ctx.strokeStyle = wepColors[p.weapon] || '#ccc';
+    ctx.lineWidth = p.weapon === 'sniper' ? 3 : 5; ctx.lineCap = 'round';
+    const bLen = p.weapon === 'sniper' ? PLAYER_R+18 : PLAYER_R+12;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + Math.cos(p.angle)*bLen, sy + Math.sin(p.angle)*bLen); ctx.stroke();
+
+    // Name + class
+    ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(p.name, sx, sy - PLAYER_R - 14);
+    ctx.fillStyle = '#888'; ctx.font = '9px sans-serif';
+    ctx.fillText(CLASS_DEFS[p.playerClass].name, sx, sy - PLAYER_R - 4);
 
     // Health bar (others)
     if (!isMe) {
-      const bw = 36, bh = 4, bx = sx - bw / 2, by = sy - PLAYER_R - 6;
-      ctx.fillStyle = '#333';
-      ctx.fillRect(bx, by, bw, bh);
-      const hpPct = Math.max(0, p.hp / MAX_HP);
-      ctx.fillStyle = hpPct > 0.5 ? '#2ecc71' : hpPct > 0.25 ? '#f39c12' : '#e74c3c';
-      ctx.fillRect(bx, by, bw * hpPct, bh);
+      const bw = 36, bh = 4, bx = sx-bw/2, by = sy + PLAYER_R + 6;
+      ctx.fillStyle = '#333'; ctx.fillRect(bx, by, bw, bh);
+      const hp = Math.max(0, p.hp / p.maxHp);
+      ctx.fillStyle = hp > 0.5 ? '#2ecc71' : hp > 0.25 ? '#f39c12' : '#e74c3c';
+      ctx.fillRect(bx, by, bw*hp, bh);
     }
+
+    ctx.globalAlpha = 1;
   }
 }
 
 function getBulletStyle(b) {
   const owner = snapshot.players[b.ownerId];
-  let color = owner ? owner.color : '#fff';
-  let radius = 4, glow = 8;
-
+  let color = owner ? owner.color : '#fff', radius = 4, glow = 8;
   if (b.ammoMod === 'explosive') { color = '#ff4444'; glow = 12; }
   else if (b.ammoMod === 'piercing') { color = '#a855f7'; glow = 10; }
-
   const wep = WEAPONS[b.weapon];
   if (wep && wep.bulletColor && !b.ammoMod) color = wep.bulletColor;
-
   if (b.weapon === 'sniper') { radius = 5; glow = 14; }
   else if (b.weapon === 'shotgun') { radius = 3; }
-
+  else if (b.weapon === 'turret') { radius = 3; glow = 6; }
   return { color, radius, glow };
 }
 
@@ -1052,50 +925,19 @@ const PICKUP_COLORS = { health: '#2ecc71', shotgun: '#ff6b35', smg: '#ffd700', s
 
 function renderPickup(sx, sy, type) {
   const color = PICKUP_COLORS[type] || '#fff';
-
-  // Glow
-  ctx.globalAlpha = 0.25;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(sx, sy, 18, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-
+  ctx.globalAlpha = 0.25; ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 18, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
   if (type === 'health') {
-    ctx.fillStyle = color;
-    ctx.fillRect(sx - 7, sy - 2, 14, 4);
-    ctx.fillRect(sx - 2, sy - 7, 4, 14);
+    ctx.fillStyle = color; ctx.fillRect(sx-7, sy-2, 14, 4); ctx.fillRect(sx-2, sy-7, 4, 14);
   } else if (type === 'piercing' || type === 'explosive') {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(sx, sy - 10);
-    ctx.lineTo(sx + 8, sy);
-    ctx.lineTo(sx, sy + 10);
-    ctx.lineTo(sx - 8, sy);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    // Label
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 8px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color; ctx.beginPath();
+    ctx.moveTo(sx, sy-10); ctx.lineTo(sx+8, sy); ctx.lineTo(sx, sy+10); ctx.lineTo(sx-8, sy);
+    ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(type === 'piercing' ? 'P' : 'E', sx, sy);
   } else {
-    // Weapon circle
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = '#000';
-    ctx.font = 'bold 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 11, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#000'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(type[0].toUpperCase(), sx, sy);
   }
 }
@@ -1103,39 +945,43 @@ function renderPickup(sx, sy, type) {
 function renderMinimap() {
   const mw = mmCanvas.width, mh = mmCanvas.height;
   mmCtx.clearRect(0, 0, mw, mh);
-  mmCtx.fillStyle = 'rgba(10,10,26,0.8)';
-  mmCtx.fillRect(0, 0, mw, mh);
+  mmCtx.fillStyle = 'rgba(10,10,26,0.8)'; mmCtx.fillRect(0, 0, mw, mh);
   if (!snapshot) return;
+  const sx = mw/MAP_W, sy = mh/MAP_H;
 
-  const sx = mw / MAP_W, sy = mh / MAP_H;
-
-  // Walls on minimap
   mmCtx.fillStyle = '#2a2a45';
-  for (const wall of WALLS) {
-    mmCtx.fillRect(wall.x * sx, wall.y * sy, Math.max(2, wall.w * sx), Math.max(2, wall.h * sy));
+  for (const w of WALLS) mmCtx.fillRect(w.x*sx, w.y*sy, Math.max(2, w.w*sx), Math.max(2, w.h*sy));
+
+  // Shield walls on minimap
+  if (snapshot.shieldWalls) {
+    mmCtx.fillStyle = 'rgba(52,152,219,0.6)';
+    for (const sw of snapshot.shieldWalls) mmCtx.fillRect(sw.x*sx, sw.y*sy, Math.max(2, sw.w*sx), Math.max(2, sw.h*sy));
   }
 
-  // Pickups on minimap
+  // Turrets on minimap
+  if (snapshot.turrets) {
+    for (const t of snapshot.turrets) {
+      mmCtx.fillStyle = t.ownerColor || '#ff9f43';
+      mmCtx.fillRect(t.x*sx-2, t.y*sy-2, 4, 4);
+    }
+  }
+
   if (snapshot.pickups) {
     for (const pk of snapshot.pickups) {
       if (!pk.active) continue;
       mmCtx.fillStyle = PICKUP_COLORS[pk.type] || '#fff';
-      mmCtx.fillRect(pk.x * sx - 1, pk.y * sy - 1, 3, 3);
+      mmCtx.fillRect(pk.x*sx-1, pk.y*sy-1, 3, 3);
     }
   }
 
-  // Players
   for (const [id, p] of Object.entries(snapshot.players)) {
-    if (!p.alive) continue;
+    if (!p.alive || (p.cloaked && id !== myPlayerId)) continue;
     mmCtx.fillStyle = id === myPlayerId ? '#fff' : p.color;
-    mmCtx.beginPath();
-    mmCtx.arc(p.x * sx, p.y * sy, id === myPlayerId ? 3 : 2, 0, Math.PI * 2);
-    mmCtx.fill();
+    mmCtx.beginPath(); mmCtx.arc(p.x*sx, p.y*sy, id === myPlayerId ? 3 : 2, 0, Math.PI*2); mmCtx.fill();
   }
 
-  mmCtx.strokeStyle = '#555';
-  mmCtx.lineWidth = 1;
-  mmCtx.strokeRect(camera.x * sx, camera.y * sy, canvas.width * sx, canvas.height * sy);
+  mmCtx.strokeStyle = '#555'; mmCtx.lineWidth = 1;
+  mmCtx.strokeRect(camera.x*sx, camera.y*sy, canvas.width*sx, canvas.height*sy);
 }
 
 function renderHUD() {
@@ -1143,107 +989,73 @@ function renderHUD() {
   const me = snapshot.players[myPlayerId];
   if (!me) return;
 
-  // Health bar
-  const hpPct = Math.max(0, me.hp / MAX_HP);
-  healthFill.style.width = (hpPct * 100) + '%';
+  const hpPct = Math.max(0, me.hp / me.maxHp);
+  healthFill.style.width = (hpPct*100) + '%';
   healthFill.style.background = hpPct > 0.5 ? '#2ecc71' : hpPct > 0.25 ? '#f39c12' : '#e74c3c';
   deathOverlay.style.display = me.alive ? 'none' : 'block';
 
-  // Weapon / Ammo display
   const wep = WEAPONS[me.weapon];
   weaponNameEl.textContent = wep.name;
   weaponNameEl.style.color = wep.bulletColor || '#ccc';
-  const reserve = me.reserveAmmo === -1 ? '\u221E' : me.reserveAmmo;
-  ammoCountEl.textContent = `${me.ammo} / ${reserve}`;
-  if (me.ammoMod) {
-    ammoModEl.textContent = me.ammoMod === 'piercing' ? 'PIERCING' : 'EXPLOSIVE';
-    ammoModEl.style.color = me.ammoMod === 'piercing' ? '#a855f7' : '#ff4444';
-  } else {
-    ammoModEl.textContent = '';
-  }
+  ammoCountEl.textContent = `${me.ammo} / ${me.reserveAmmo === -1 ? '\u221E' : me.reserveAmmo}`;
+  if (me.ammoMod) { ammoModEl.textContent = me.ammoMod.toUpperCase(); ammoModEl.style.color = me.ammoMod === 'piercing' ? '#a855f7' : '#ff4444'; }
+  else ammoModEl.textContent = '';
 
-  // Reload bar
-  if (me.reloading) {
-    reloadBarEl.style.display = 'block';
-    reloadFillEl.style.width = (me.reloadPct * 100) + '%';
-  } else {
-    reloadBarEl.style.display = 'none';
-  }
+  if (me.reloading) { reloadBarEl.style.display = 'block'; reloadFillEl.style.width = (me.reloadPct*100)+'%'; }
+  else reloadBarEl.style.display = 'none';
+
+  // Ability
+  const cls = CLASS_DEFS[me.playerClass];
+  abilityNameEl.textContent = cls.ability;
+  abilityCdFillEl.style.width = (me.abilityCdPct * 100) + '%';
+  abilityDisplayEl.className = me.abilityReady ? 'ready' : 'cooldown';
+  abilityCdFillEl.style.background = me.abilityReady ? '#3498db' : '#555';
 
   // Scoreboard
-  const sorted = Object.entries(snapshot.players).sort(([,a],[,b]) => b.kills - a.kills || a.deaths - b.deaths);
+  const sorted = Object.entries(snapshot.players).sort(([,a],[,b]) => b.kills-a.kills || a.deaths-b.deaths);
   scoreboardEl.innerHTML = `<div class="sb-header">Scoreboard</div>` +
-    sorted.map(([id, p]) => `
-      <div class="sb-row" style="${id === myPlayerId ? 'color:#fff;font-weight:600' : ''}">
-        <span class="sb-name" style="color:${p.color}">${escapeHtml(p.name)}</span>
-        <span class="sb-kd">${p.kills}K / ${p.deaths}D</span>
-      </div>
-    `).join('');
+    sorted.map(([id, p]) => `<div class="sb-row" style="${id===myPlayerId?'color:#fff;font-weight:600':''}">
+      <span class="sb-name" style="color:${p.color}">${escapeHtml(p.name)}</span>
+      <span class="sb-kd">${p.kills}K / ${p.deaths}D</span>
+    </div>`).join('');
 
-  // Kill feed
   const now = Date.now();
   killNotifications = killNotifications.filter(n => now - n.time < 3500);
   killFeedEl.innerHTML = killNotifications.map(n => {
-    const age = now - n.time;
-    const opacity = age > 2500 ? 1 - (age - 2500) / 1000 : 1;
-    return `<div class="kill-msg${n.isMyKill ? ' my-kill' : ''}" style="opacity:${opacity.toFixed(2)}">${escapeHtml(n.text)}</div>`;
+    const age = now - n.time, op = age > 2500 ? 1-(age-2500)/1000 : 1;
+    return `<div class="kill-msg${n.isMyKill?' my-kill':''}" style="opacity:${op.toFixed(2)}">${escapeHtml(n.text)}</div>`;
   }).join('');
 }
 
 // ========================
 // UI EVENT LISTENERS
 // ========================
-$('createBtn').addEventListener('click', () => {
-  myName = nameInput.value.trim() || 'Player';
-  createRoom();
-});
-
-$('joinBtn').addEventListener('click', () => {
-  myName = nameInput.value.trim() || 'Player';
-  setStatus(joinStatus, '');
-  $('connectBtn').disabled = false;
-  showScreen('join');
-});
-
-nameInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') $('createBtn').click();
-});
-
-$('connectBtn').addEventListener('click', () => {
-  joinRoom(codeInput.value);
-});
-
-codeInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') $('connectBtn').click();
-});
-
-$('joinBack').addEventListener('click', () => {
-  if (peer) { try { peer.destroy(); } catch(e) {} peer = null; }
-  showScreen('start');
-});
+$('createBtn').addEventListener('click', () => { myName = nameInput.value.trim() || 'Player'; createRoom(); });
+$('joinBtn').addEventListener('click', () => { myName = nameInput.value.trim() || 'Player'; setStatus(joinStatus, ''); $('connectBtn').disabled = false; showScreen('join'); });
+nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('createBtn').click(); });
+$('connectBtn').addEventListener('click', () => { joinRoom(codeInput.value); });
+codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('connectBtn').click(); });
+$('joinBack').addEventListener('click', () => { if (peer) { try { peer.destroy(); } catch(e) {} peer = null; } showScreen('start'); });
 
 $('readyBtn').addEventListener('click', () => {
-  if (isHost) {
-    lobbyPlayers['0'].ready = !lobbyPlayers['0'].ready;
-    broadcastLobbyState();
-    updateRoomDisplay();
-  } else if (hostConn && hostConn.open) {
-    hostConn.send({ type: 'ready' });
-  }
+  if (isHost) { lobbyPlayers['0'].ready = !lobbyPlayers['0'].ready; broadcastLobbyState(); updateRoomDisplay(); }
+  else if (hostConn && hostConn.open) hostConn.send({ type: 'ready' });
 });
+$('startGameBtn').addEventListener('click', () => { if (isHost && Object.keys(lobbyPlayers).length >= 1) startGameHost(); });
+$('leaveLobbyBtn').addEventListener('click', () => { cleanupGame(); showScreen('start'); });
+$('leaveBtn').addEventListener('click', () => { cleanupGame(); showScreen('start'); });
 
-$('startGameBtn').addEventListener('click', () => {
-  if (!isHost) return;
-  if (Object.keys(lobbyPlayers).length < 1) return;
-  startGameHost();
-});
-
-$('leaveLobbyBtn').addEventListener('click', () => {
-  cleanupGame();
-  showScreen('start');
-});
-
-$('leaveBtn').addEventListener('click', () => {
-  cleanupGame();
-  showScreen('start');
+// Class selector
+document.querySelectorAll('.class-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.class-card').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+    selectedClass = card.dataset.class;
+    if (isHost) {
+      lobbyPlayers['0'].playerClass = selectedClass;
+      broadcastLobbyState(); updateRoomDisplay();
+    } else if (hostConn && hostConn.open) {
+      hostConn.send({ type: 'selectClass', cls: selectedClass });
+    }
+  });
 });
