@@ -204,6 +204,80 @@
       border-radius: 4px;
       background: rgba(0,0,0,0.5);
     }
+
+    /* Ammo Display */
+    #ammoDisplay {
+      position: absolute;
+      bottom: 15px;
+      left: 20px;
+      background: rgba(0,0,0,0.6);
+      border-radius: 6px;
+      padding: 8px 14px;
+      line-height: 1.4;
+    }
+    #weaponName { font-weight: 700; font-size: 16px; }
+    #ammoCount { color: #aaa; font-size: 14px; }
+    #ammoMod { font-size: 11px; font-weight: 600; letter-spacing: 1px; }
+
+    /* Reload Bar */
+    #reloadBar {
+      display: none;
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 120px;
+      text-align: center;
+    }
+    #reloadBarInner {
+      height: 6px;
+      background: #333;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 2px;
+    }
+    #reloadFill {
+      height: 100%;
+      background: #f39c12;
+      width: 0%;
+      border-radius: 3px;
+    }
+    #reloadBar span { font-size: 11px; color: #f39c12; font-weight: 600; }
+
+    /* Kill Feed */
+    #killFeed {
+      position: absolute;
+      top: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .kill-msg {
+      background: rgba(0,0,0,0.7);
+      padding: 4px 14px;
+      border-radius: 4px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .kill-msg.my-kill {
+      color: #2ecc71;
+      font-weight: 700;
+      background: rgba(46,204,113,0.15);
+    }
+
+    /* Controls hint */
+    #controlsHint {
+      position: absolute;
+      bottom: 45px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      color: #555;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -247,7 +321,18 @@
     <div id="hud">
       <button class="btn btn-gray" id="leaveBtn">Leave</button>
       <div id="scoreboard"></div>
+      <div id="killFeed"></div>
       <canvas id="minimap"></canvas>
+      <div id="ammoDisplay">
+        <div id="weaponName">Pistol</div>
+        <div id="ammoCount">12 / &infin;</div>
+        <div id="ammoMod"></div>
+      </div>
+      <div id="reloadBar">
+        <div id="reloadBarInner"><div id="reloadFill"></div></div>
+        <span>RELOADING</span>
+      </div>
+      <div id="controlsHint">WASD move &middot; Mouse aim &middot; Click shoot &middot; R reload</div>
       <div id="healthBar"><div id="healthFill"></div></div>
       <div id="deathOverlay">YOU DIED — respawning...</div>
     </div>
