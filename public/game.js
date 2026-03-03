@@ -12,7 +12,7 @@ const EXPLOSION_RADIUS = 60, EXPLOSION_DMG = 20, EXPLOSION_DURATION = 400;
 const TURRET_R = 12, TURRET_RANGE = 300, TURRET_FIRE_RATE = 1000, TURRET_DURATION = 10000, TURRET_HP = 50;
 const SHIELD_DURATION = 5000;
 const DASH_DIST = 150, DASH_INVULN = 200;
-const CLOAK_DURATION = 4000;
+const CLOAK_DURATION = 6000;
 const COLORS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#00cec9','#fd79a8','#6c5ce7'];
 
 // ========================
@@ -37,7 +37,7 @@ const WEAPONS = {
   },
   shotgun: {
     name: 'Shotgun', clip: 6, reloadTime: 1500, cooldown: 600,
-    damage: 14, speed: 10, lifetime: 600, bounces: 0,
+    damage: 14, speed: 10, lifetime: 1000, bounces: 0,
     spread: 0.26, projectiles: 5, bulletColor: '#ff6b35',
     infinite: false, reserveAmmo: 18,
   },
@@ -52,6 +52,12 @@ const WEAPONS = {
     damage: 65, speed: 25, lifetime: 2500, bounces: 0,
     spread: 0, projectiles: 1, bulletColor: '#00ffff',
     infinite: false, reserveAmmo: 10, pierce: true,
+  },
+  rocket: {
+    name: 'Rocket', clip: 2, reloadTime: 2500, cooldown: 1200,
+    damage: 40, speed: 7, lifetime: 2000, bounces: 0,
+    spread: 0, projectiles: 1, bulletColor: '#ff4444',
+    infinite: false, reserveAmmo: 6, explosive: true,
   },
   turret: {
     name: 'Turret', clip: 999, reloadTime: 0, cooldown: 1000,
@@ -117,7 +123,7 @@ const OFFENSIVE_BUFF_IDS = Object.keys(BUFF_DEFS).filter(k => BUFF_DEFS[k].type 
 const DEFENSIVE_BUFF_IDS = Object.keys(BUFF_DEFS).filter(k => BUFF_DEFS[k].type === 'defensive');
 const SHRAPNEL_RADIUS = 40, SHRAPNEL_DMG = 15;
 const CHAIN_LIGHTNING_RANGE = 120, CHAIN_LIGHTNING_DMG = 8;
-const RANDOM_PICKUP_TYPES = ['shotgun','smg','sniper','piercing','explosive','buff'];
+const RANDOM_PICKUP_TYPES = ['shotgun','smg','sniper','rocket','piercing','explosive','buff'];
 const RANDOM_PICKUP_INTERVAL = 5000;
 const RANDOM_PICKUP_LIFETIME = 10000;
 const WEAPON_DISPLAY_NAMES = { explosive: 'Explosion', thorns: 'Thorn Armor', bleed: 'Bleed', chain_lightning: 'Chain Lightning', turret: 'Turret' };
@@ -315,6 +321,9 @@ let snapshot = null;
 let keys = { up: false, down: false, left: false, right: false, sprint: false };
 let mouseX = 0, mouseY = 0, mouseDown = false;
 let camera = { x: 0, y: 0 };
+let cameraZoom = 1.0;
+const ZOOM_MIN = 0.5, ZOOM_MAX = 1.5;
+let pinchStartDist = 0, pinchStartZoom = 1;
 let inputInterval = null;
 let gameRunning = false;
 let killNotifications = [];
@@ -499,6 +508,12 @@ function joinRoom(code) {
             killNotifications.push({ text: `${ev.killer} killed ${ev.victim}`, time: Date.now(), isMyKill: ev.killerId === myPlayerId });
           }
         }
+        if (data.buffPickupEvents) {
+          for (const ev of data.buffPickupEvents) {
+            const def = BUFF_DEFS[ev.buffId];
+            if (def) killNotifications.push({ text: `${ev.playerId} picked up ${def.name}: ${def.desc}`, time: Date.now(), isBuff: true });
+          }
+        }
         // Check for buff selection from host
         if (myPlayerId && data.players[myPlayerId]) {
           const me = data.players[myPlayerId];
@@ -584,6 +599,7 @@ function createGameState() {
     explosions: [], killEvents: [],
     turrets: [], turretIdCounter: 0,
     shieldWalls: [], shieldWallIdCounter: 0,
+    buffPickupEvents: [],
     nextRandomSpawn: Date.now() + 3000, randomPickupId: 10000,
   };
   const ids = Object.keys(lobbyPlayers);
@@ -955,18 +971,24 @@ function resetPlayerWeapon(p) {
 function applyPickup(p, pickup) {
   switch (pickup.type) {
     case 'health': p.hp = Math.min(p.maxHp, p.hp + (pickup.scavengerHeal || 50)); break;
-    case 'shotgun': case 'smg': case 'sniper':
+    case 'shotgun': case 'smg': case 'sniper': case 'rocket':
       if (p.weapon === pickup.type) { p.reserveAmmo = WEAPONS[pickup.type].reserveAmmo; }
       else { p.weapon = pickup.type; p.ammo = WEAPONS[pickup.type].clip; p.reserveAmmo = WEAPONS[pickup.type].reserveAmmo; p.reloading = false; p.ammoMod = null; }
       break;
     case 'piercing': case 'explosive': p.ammoMod = pickup.type; break;
-    case 'buff': if (pickup.buffId) applyBuff(p, pickup.buffId); break;
+    case 'buff':
+      if (pickup.buffId) {
+        applyBuff(p, pickup.buffId);
+        if (gameState) gameState.buffPickupEvents.push({ playerId: p.name, buffId: pickup.buffId });
+      }
+      break;
   }
 }
 
 function updateGame() {
   const now = Date.now();
   gameState.killEvents = [];
+  gameState.buffPickupEvents = [];
   gameState.explosions = gameState.explosions.filter(e => now - e.time < EXPLOSION_DURATION);
 
   // Expire shield walls
@@ -1118,10 +1140,12 @@ function updateGame() {
       const bulletSpeed = wep.speed * bs.bulletSpeedMult;
       const bulletBounces = wep.bounces + bs.extraBounces;
       const hasShrapnel = !!(p.buffs.shrapnel);
-      const shotsToFire = 1 + ((p.buffs.double_tap && Math.random() < 0.15 * effCount(p, 'double_tap')) ? 1 : 0);
+      const doubleTapFired = p.buffs.double_tap && Math.random() < 0.15 * effCount(p, 'double_tap');
+      const shotsToFire = 1 + (doubleTapFired ? 1 : 0);
       for (let shot = 0; shot < shotsToFire && p.ammo > 0; shot++) {
+        const dtSpread = shot > 0 ? (Math.random() - 0.5) * 0.2 : 0; // spread offset for double tap
         for (let j = 0; j < wep.projectiles; j++) {
-          const sa = p.angle + (wep.spread > 0 ? (Math.random()-0.5)*wep.spread*2 : 0);
+          const sa = p.angle + dtSpread + (wep.spread > 0 ? (Math.random()-0.5)*wep.spread*2 : 0);
           gameState.bullets.push({
             id: gameState.bulletIdCounter++, ownerId: id,
             x: p.x + Math.cos(p.angle)*(PLAYER_R+8), y: p.y + Math.sin(p.angle)*(PLAYER_R+8),
@@ -1203,6 +1227,8 @@ function updateGame() {
     // Wall collision
     let hitWall = false;
     for (const wall of allWalls) {
+      // Owner bullets pass through their own shield walls
+      if (wall.ownerId && wall.ownerId === b.ownerId) continue;
       if (pointInRect(b.x, b.y, wall)) {
         if (b.bounces > 0) {
           b.bounces--;
@@ -1211,7 +1237,7 @@ function updateGame() {
           if (m===oL||m===oR) { b.vx=-b.vx; b.x = m===oL ? wall.x-1 : wall.x+wall.w+1; }
           else { b.vy=-b.vy; b.y = m===oT ? wall.y-1 : wall.y+wall.h+1; }
         } else {
-          if (b.ammoMod === 'explosive') triggerExplosion(b.x, b.y, b.ownerId, now);
+          if (b.ammoMod === 'explosive' || b.weapon === 'rocket') triggerExplosion(b.x, b.y, b.ownerId, now);
           if (b.shrapnel) triggerExplosion(b.x, b.y, b.ownerId, now, SHRAPNEL_RADIUS, SHRAPNEL_DMG);
           gameState.bullets.splice(i, 1); hitWall = true;
         }
@@ -1234,7 +1260,7 @@ function updateGame() {
         let rawDmg = Math.round(WEAPONS[b.weapon].damage * ownerBs.damageMult);
         const bs2 = getBuffStats(p);
         rawDmg = Math.round(rawDmg * (1 - bs2.dmgReduction));
-        if (b.ammoMod === 'explosive') triggerExplosion(b.x, b.y, b.ownerId, now);
+        if (b.ammoMod === 'explosive' || b.weapon === 'rocket') triggerExplosion(b.x, b.y, b.ownerId, now);
         // On-hit buff effects from shooter
         if (owner) {
           // Vampiric Rounds
@@ -1289,7 +1315,7 @@ function updateGame() {
       if (b.ownerId === t.ownerId) continue;
       if (Math.sqrt((t.x-b.x)**2 + (t.y-b.y)**2) < TURRET_R + BULLET_R) {
         t.hp -= WEAPONS[b.weapon].damage;
-        if (b.ammoMod === 'explosive') triggerExplosion(b.x, b.y, b.ownerId, now);
+        if (b.ammoMod === 'explosive' || b.weapon === 'rocket') triggerExplosion(b.x, b.y, b.ownerId, now);
         if (!b.pierce) { gameState.bullets.splice(i, 1); removed = true; }
         break;
       }
@@ -1340,6 +1366,7 @@ function getSnapshot() {
       spawnShielded: p.spawnShieldEnd && now < p.spawnShieldEnd,
       tracked: p.trackedUntil && now < p.trackedUntil,
       lastKilledBy: p.lastKilledBy || null,
+      killsThisLife: p.killsThisLife || 0,
     };
   }
   return {
@@ -1350,6 +1377,7 @@ function getSnapshot() {
     turrets: gameState.turrets.map(t => ({ id: t.id, x: t.x, y: t.y, hp: t.hp, maxHp: t.maxHp, ownerId: t.ownerId, ownerColor: t.ownerColor, angle: t.angle })),
     shieldWalls: gameState.shieldWalls.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, ownerId: s.ownerId })),
     killEvents: gameState.killEvents,
+    buffPickupEvents: gameState.buffPickupEvents,
   };
 }
 
@@ -1378,6 +1406,12 @@ function startGameHost() {
     }
     if (snapshot.killEvents) {
       for (const ev of snapshot.killEvents) killNotifications.push({ text: `${ev.killer} killed ${ev.victim}`, time: Date.now(), isMyKill: ev.killerId === '0' });
+    }
+    if (snapshot.buffPickupEvents) {
+      for (const ev of snapshot.buffPickupEvents) {
+        const def = BUFF_DEFS[ev.buffId];
+        if (def) killNotifications.push({ text: `${ev.playerId} picked up ${def.name}: ${def.desc}`, time: Date.now(), isBuff: true });
+      }
     }
     const msg = { type: 'state', ...snapshot };
     for (const conn of Object.values(hostConns)) { try { conn.send(msg); } catch(e) {} }
@@ -1415,6 +1449,7 @@ function cleanupGame() {
   killNotifications = [];
   buffPickerChoices = null;
   isPublicGame = false;
+  cameraZoom = 1.0;
   // Remove bots from lobby
   for (const id in lobbyPlayers) { if (lobbyPlayers[id].isBot) delete lobbyPlayers[id]; }
   joystickTouch = null;
@@ -1525,6 +1560,7 @@ window.addEventListener('mousedown', (e) => {
 });
 window.addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; });
 window.addEventListener('contextmenu', (e) => { if (currentScreen === 'game') e.preventDefault(); });
+window.addEventListener('wheel', (e) => { if (currentScreen === 'game') { e.preventDefault(); cameraZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, cameraZoom - e.deltaY * 0.001)); } }, { passive: false });
 
 // ========================
 // TOUCH CONTROLS
@@ -1548,7 +1584,31 @@ function initTouchControls() {
   setupJoystickZone();
   setupAimPadZone();
   setupTouchButtons();
+  setupPinchZoom();
   $('abilityKey').textContent = 'TAP';
+}
+
+function setupPinchZoom() {
+  const gameScreen = $('gameScreen');
+  gameScreen.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchStartDist = Math.sqrt(dx * dx + dy * dy);
+      pinchStartZoom = cameraZoom;
+    }
+  }, { passive: true });
+  gameScreen.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (pinchStartDist > 0) {
+        cameraZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinchStartZoom * (dist / pinchStartDist)));
+      }
+    }
+  }, { passive: true });
+  gameScreen.addEventListener('touchend', () => { pinchStartDist = 0; }, { passive: true });
 }
 
 function setupJoystickZone() {
@@ -1708,14 +1768,21 @@ function render() {
   if (!snapshot) return;
   const me = snapshot.players[myPlayerId];
   if (!me) return;
-  camera.x = me.x - W/2; camera.y = me.y - H/2;
+  // Apply zoom: camera covers more area when zoomed out
+  const viewW = W / cameraZoom, viewH = H / cameraZoom;
+  camera.x = me.x - viewW/2; camera.y = me.y - viewH/2;
 
   ctx.fillStyle = '#111122'; ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(W/2, H/2);
+  ctx.scale(cameraZoom, cameraZoom);
+  ctx.translate(-W/2, -H/2);
+  const VW = viewW, VH = viewH; // culling bounds (accounts for zoom)
 
   // Grid
   ctx.strokeStyle = '#1a1a35'; ctx.lineWidth = 1;
-  for (let x = -(camera.x % 50); x < W; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-  for (let y = -(camera.y % 50); y < H; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  for (let x = -(camera.x % 50); x < VW; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, VH); ctx.stroke(); }
+  for (let y = -(camera.y % 50); y < VH; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(VW, y); ctx.stroke(); }
 
   ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 3;
   ctx.strokeRect(-camera.x, -camera.y, MAP_W, MAP_H);
@@ -1723,7 +1790,7 @@ function render() {
   // Walls
   for (const wall of WALLS) {
     const wx = wall.x - camera.x, wy = wall.y - camera.y;
-    if (wx+wall.w < -10 || wx > W+10 || wy+wall.h < -10 || wy > H+10) continue;
+    if (wx+wall.w < -10 || wx > VW+10 || wy+wall.h < -10 || wy > VH+10) continue;
     ctx.fillStyle = '#2a2a45'; ctx.fillRect(wx, wy, wall.w, wall.h);
     ctx.strokeStyle = '#3d3d5c'; ctx.lineWidth = 2; ctx.strokeRect(wx, wy, wall.w, wall.h);
   }
@@ -1732,7 +1799,7 @@ function render() {
   if (snapshot.shieldWalls) {
     for (const sw of snapshot.shieldWalls) {
       const sx = sw.x - camera.x, sy = sw.y - camera.y;
-      if (sx+sw.w < -10 || sx > W+10 || sy+sw.h < -10 || sy > H+10) continue;
+      if (sx+sw.w < -10 || sx > VW+10 || sy+sw.h < -10 || sy > VH+10) continue;
       const pulse = 0.3 + Math.sin(Date.now()/200) * 0.1;
       ctx.fillStyle = `rgba(52, 152, 219, ${pulse})`;
       ctx.fillRect(sx, sy, sw.w, sw.h);
@@ -1747,7 +1814,7 @@ function render() {
     for (const pk of snapshot.pickups) {
       if (!pk.active) continue;
       const sx = pk.x - camera.x, sy = pk.y - camera.y + Math.sin(bobT + pk.id) * 3;
-      if (sx < -30 || sx > W+30 || sy < -30 || sy > H+30) continue;
+      if (sx < -30 || sx > VW+30 || sy < -30 || sy > VH+30) continue;
       renderPickup(sx, sy, pk.type, pk.expiresIn || 0, pk.buffId);
     }
   }
@@ -1756,7 +1823,7 @@ function render() {
   if (snapshot.explosions) {
     for (const e of snapshot.explosions) {
       const sx = e.x - camera.x, sy = e.y - camera.y;
-      if (sx < -80 || sx > W+80 || sy < -80 || sy > H+80) continue;
+      if (sx < -80 || sx > VW+80 || sy < -80 || sy > VH+80) continue;
       const pct = Math.min(1, e.age / EXPLOSION_DURATION);
       const r = 10 + 50 * pct, a = (1-pct) * 0.6;
       ctx.fillStyle = `rgba(255,150,0,${a})`; ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.fill();
@@ -1769,7 +1836,7 @@ function render() {
   if (snapshot.turrets) {
     for (const t of snapshot.turrets) {
       const sx = t.x - camera.x, sy = t.y - camera.y;
-      if (sx < -30 || sx > W+30 || sy < -30 || sy > H+30) continue;
+      if (sx < -30 || sx > VW+30 || sy < -30 || sy > VH+30) continue;
       ctx.fillStyle = '#444'; ctx.beginPath(); ctx.arc(sx, sy, TURRET_R, 0, Math.PI*2); ctx.fill();
       ctx.strokeStyle = t.ownerColor || '#ff9f43'; ctx.lineWidth = 2; ctx.stroke();
       ctx.strokeStyle = t.ownerColor || '#ff9f43'; ctx.lineWidth = 3; ctx.lineCap = 'round';
@@ -1783,7 +1850,7 @@ function render() {
   // Bullets
   for (const b of snapshot.bullets) {
     const sx = b.x - camera.x, sy = b.y - camera.y;
-    if (sx < -10 || sx > W+10 || sy < -10 || sy > H+10) continue;
+    if (sx < -10 || sx > VW+10 || sy < -10 || sy > VH+10) continue;
     const st = getBulletStyle(b);
     ctx.fillStyle = st.color; ctx.shadowColor = st.color; ctx.shadowBlur = st.glow;
     ctx.beginPath(); ctx.arc(sx, sy, st.radius, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
@@ -1798,7 +1865,7 @@ function render() {
     }
     const sx = p.x - camera.x, sy = p.y - camera.y;
     const isMe = id === myPlayerId;
-    const offScreen = sx < -50 || sx > W+50 || sy < -50 || sy > H+50;
+    const offScreen = sx < -50 || sx > VW+50 || sy < -50 || sy > VH+50;
 
     // Tracker Rounds: render through walls if tracked and off-screen or behind walls
     if (!isMe && p.tracked && myData && myData.buffs && myData.buffs.tracker_rounds) {
@@ -1807,8 +1874,8 @@ function render() {
         // Draw directional indicator at edge of screen
         const dx = p.x - (myData.x || 0), dy = p.y - (myData.y || 0);
         const angle = Math.atan2(dy, dx);
-        const edgeX = W/2 + Math.cos(angle) * (W/2 - 40);
-        const edgeY = H/2 + Math.sin(angle) * (H/2 - 40);
+        const edgeX = VW/2 + Math.cos(angle) * (VW/2 - 40);
+        const edgeY = VH/2 + Math.sin(angle) * (VH/2 - 40);
         ctx.fillStyle = 'rgba(155, 89, 182, 0.6)';
         ctx.beginPath(); ctx.arc(edgeX, edgeY, 6, 0, Math.PI*2); ctx.fill();
         ctx.fillStyle = '#fff'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
@@ -1851,15 +1918,41 @@ function render() {
       ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(sx, sy, PLAYER_R + 5, 0, Math.PI*2); ctx.stroke();
     }
 
+    // Killstreak fire effect (3+ kills)
+    if (p.killsThisLife >= 3) {
+      const intensity = Math.min(p.killsThisLife, 10);
+      const t = Date.now() / 60;
+      const flames = 3 + Math.floor(intensity / 2);
+      for (let f = 0; f < flames; f++) {
+        const seed = f * 137.5 + t;
+        const baseAngle = (f / flames) * Math.PI * 2 + Math.sin(t * 0.3 + f) * 0.5;
+        const dist = PLAYER_R - 2 + Math.sin(seed) * 4;
+        const fx = sx + Math.cos(baseAngle) * dist;
+        const fy = sy + Math.sin(baseAngle) * dist;
+        const flameH = 6 + Math.sin(seed * 1.3) * 4 + intensity * 0.8;
+        const flameW = 3 + Math.sin(seed * 0.7) * 1.5;
+        const age = (Math.sin(seed * 2) + 1) / 2;
+        const r = Math.round(255);
+        const g = Math.round(80 + 120 * (1 - age));
+        const b2 = Math.round(20 * (1 - age));
+        ctx.globalAlpha = 0.6 - age * 0.4;
+        ctx.fillStyle = `rgb(${r},${g},${b2})`;
+        ctx.beginPath();
+        ctx.ellipse(fx, fy - flameH * 0.5, flameW, flameH * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = p.cloaked ? (isMe ? 0.3 : 0.05) : 1;
+    }
+
     // Body
     ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(sx, sy, PLAYER_R, 0, Math.PI*2); ctx.fill();
     if (isMe) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx, sy, PLAYER_R+2, 0, Math.PI*2); ctx.stroke(); }
 
     // Gun barrel
-    const wepColors = { pistol: '#ccc', shotgun: '#ff6b35', smg: '#ffd700', sniper: '#00ffff', turret: '#ff9f43' };
+    const wepColors = { pistol: '#ccc', shotgun: '#ff6b35', smg: '#ffd700', sniper: '#00ffff', rocket: '#ff4444', turret: '#ff9f43' };
     ctx.strokeStyle = wepColors[p.weapon] || '#ccc';
-    ctx.lineWidth = p.weapon === 'sniper' ? 3 : 5; ctx.lineCap = 'round';
-    const bLen = p.weapon === 'sniper' ? PLAYER_R+18 : PLAYER_R+12;
+    ctx.lineWidth = p.weapon === 'sniper' ? 3 : p.weapon === 'rocket' ? 6 : 5; ctx.lineCap = 'round';
+    const bLen = p.weapon === 'sniper' ? PLAYER_R+18 : p.weapon === 'rocket' ? PLAYER_R+16 : PLAYER_R+12;
     ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + Math.cos(p.angle)*bLen, sy + Math.sin(p.angle)*bLen); ctx.stroke();
 
     // Name + class
@@ -1884,6 +1977,8 @@ function render() {
 
     ctx.globalAlpha = 1;
   }
+
+  ctx.restore(); // end zoom transform
 }
 
 function getBulletStyle(b) {
@@ -1895,11 +1990,12 @@ function getBulletStyle(b) {
   if (wep && wep.bulletColor && !b.ammoMod) color = wep.bulletColor;
   if (b.weapon === 'sniper') { radius = 5; glow = 14; }
   else if (b.weapon === 'shotgun') { radius = 3; }
+  else if (b.weapon === 'rocket') { radius = 6; glow = 16; }
   else if (b.weapon === 'turret') { radius = 3; glow = 6; }
   return { color, radius, glow };
 }
 
-const PICKUP_COLORS = { health: '#2ecc71', shotgun: '#ff6b35', smg: '#ffd700', sniper: '#00ffff', piercing: '#a855f7', explosive: '#ff4444', buff: '#f39c12' };
+const PICKUP_COLORS = { health: '#2ecc71', shotgun: '#ff6b35', smg: '#ffd700', sniper: '#00ffff', rocket: '#ff4444', piercing: '#a855f7', explosive: '#ff4444', buff: '#f39c12' };
 
 function renderPickup(sx, sy, type, expiresIn, buffId) {
   const color = PICKUP_COLORS[type] || '#fff';
@@ -1918,30 +2014,62 @@ function renderPickup(sx, sy, type, expiresIn, buffId) {
   if (type === 'health') {
     ctx.fillStyle = color; ctx.fillRect(sx-7, sy-2, 14, 4); ctx.fillRect(sx-2, sy-7, 4, 14);
   } else if (type === 'shotgun') {
-    // Barrel + spread lines
-    ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(sx-8, sy); ctx.lineTo(sx+2, sy); ctx.stroke();
-    ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(sx+2, sy); ctx.lineTo(sx+10, sy-5); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(sx+2, sy); ctx.lineTo(sx+11, sy); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(sx+2, sy); ctx.lineTo(sx+10, sy+5); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(sx-3, sy); ctx.lineTo(sx-5, sy+6); ctx.stroke();
-  } else if (type === 'smg') {
-    ctx.fillStyle = color;
-    ctx.fillRect(sx-7, sy-2, 14, 4);
-    ctx.fillRect(sx+4, sy-4, 3, 2);
-    ctx.fillRect(sx-2, sy+2, 4, 4);
-  } else if (type === 'sniper') {
-    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(sx-12, sy); ctx.lineTo(sx+12, sy); ctx.stroke();
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(sx-4, sy); ctx.lineTo(sx+6, sy); ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(sx+3, sy-4, 2.5, 0, Math.PI*2); ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(sx+3, sy-1.5); ctx.lineTo(sx+3, sy); ctx.stroke();
+    // Double barrel shotgun silhouette
+    ctx.strokeStyle = color; ctx.lineCap = 'round';
+    // Twin barrels
     ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(sx-1, sy); ctx.lineTo(sx-2, sy+5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx-4, sy-2); ctx.lineTo(sx+10, sy-2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx-4, sy+2); ctx.lineTo(sx+10, sy+2); ctx.stroke();
+    // Stock
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(sx-4, sy); ctx.lineTo(sx-10, sy+4); ctx.stroke();
+    // Muzzle flash lines
+    ctx.lineWidth = 1; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.moveTo(sx+10, sy); ctx.lineTo(sx+14, sy-4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx+10, sy); ctx.lineTo(sx+15, sy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx+10, sy); ctx.lineTo(sx+14, sy+4); ctx.stroke();
+    ctx.globalAlpha = 1;
+  } else if (type === 'smg') {
+    // Compact SMG silhouette
+    ctx.fillStyle = color;
+    // Body
+    ctx.fillRect(sx-8, sy-2, 16, 5);
+    // Barrel
+    ctx.fillRect(sx+8, sy-1, 4, 3);
+    // Magazine
+    ctx.fillRect(sx-2, sy+3, 4, 5);
+    // Stock notch
+    ctx.fillRect(sx-8, sy-4, 3, 2);
+  } else if (type === 'sniper') {
+    // Long rifle silhouette
+    ctx.strokeStyle = color; ctx.lineCap = 'round';
+    // Long barrel
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(sx-12, sy); ctx.lineTo(sx+12, sy); ctx.stroke();
+    // Thick receiver
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(sx-4, sy); ctx.lineTo(sx+4, sy); ctx.stroke();
+    // Scope
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = color;
+    ctx.strokeRect(sx, sy-6, 6, 4);
+    ctx.fillStyle = color; ctx.globalAlpha = 0.4;
+    ctx.fillRect(sx, sy-6, 6, 4);
+    ctx.globalAlpha = 1;
+    // Stock
+    ctx.lineWidth = 2; ctx.strokeStyle = color;
+    ctx.beginPath(); ctx.moveTo(sx-8, sy); ctx.lineTo(sx-11, sy+5); ctx.stroke();
+  } else if (type === 'rocket') {
+    // Rocket launcher tube
+    ctx.fillStyle = color;
+    ctx.fillRect(sx-10, sy-3, 20, 6);
+    // Warhead cone
+    ctx.beginPath(); ctx.moveTo(sx+10, sy-4); ctx.lineTo(sx+14, sy); ctx.lineTo(sx+10, sy+4); ctx.closePath(); ctx.fill();
+    // Grip
+    ctx.fillRect(sx-3, sy+3, 4, 4);
+    // Exhaust ring
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(sx-10, sy, 3, Math.PI*0.5, Math.PI*1.5); ctx.stroke();
   } else if (type === 'piercing' || type === 'explosive') {
     ctx.fillStyle = color; ctx.beginPath();
     ctx.moveTo(sx, sy-10); ctx.lineTo(sx+8, sy); ctx.lineTo(sx, sy+10); ctx.lineTo(sx-8, sy);
@@ -1960,7 +2088,14 @@ function renderPickup(sx, sy, type, expiresIn, buffId) {
     }
     ctx.closePath(); ctx.fill();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke();
-    if (bDef) { ctx.fillStyle = '#fff'; ctx.font = 'bold 7px sans-serif'; ctx.fillText(bDef.name[0], sx, sy+1); }
+    if (bDef) {
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 7px sans-serif'; ctx.fillText(bDef.name[0], sx, sy+1);
+      // Show buff name + description below star
+      ctx.font = 'bold 9px sans-serif'; ctx.fillStyle = bColor;
+      ctx.fillText(bDef.name, sx, sy + 18);
+      ctx.font = '8px sans-serif'; ctx.fillStyle = '#aaa';
+      ctx.fillText(bDef.desc, sx, sy + 28);
+    }
   } else {
     ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 11, 0, Math.PI*2); ctx.fill();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -2134,8 +2269,8 @@ function renderHUD() {
         const kb = me.lastKilledBy;
         const wepName = WEAPONS[kb.weapon] ? WEAPONS[kb.weapon].name : (WEAPON_DISPLAY_NAMES[kb.weapon] || kb.weapon);
         const wepColor = (WEAPONS[kb.weapon] && WEAPONS[kb.weapon].bulletColor) || (kb.weapon === 'explosive' ? '#ff4444' : kb.weapon === 'thorns' ? '#f39c12' : '#ccc');
-        const barW = {pistol:16,shotgun:20,smg:22,sniper:30}[kb.weapon] || 16;
-        const barH = {pistol:4,shotgun:6,smg:3,sniper:2}[kb.weapon] || 4;
+        const barW = {pistol:16,shotgun:20,smg:22,sniper:30,rocket:24}[kb.weapon] || 16;
+        const barH = {pistol:4,shotgun:6,smg:3,sniper:2,rocket:6}[kb.weapon] || 4;
         dhtml += `<div class="death-killed-by">Killed by</div>`;
         dhtml += `<div class="death-killer-name" style="color:${kb.color}">${escapeHtml(kb.name)}</div>`;
         dhtml += `<div class="death-weapon-info"><span style="display:inline-block;width:${barW}px;height:${barH}px;background:${wepColor};border-radius:1px"></span><span style="color:${wepColor}">${escapeHtml(wepName)}</span></div>`;
@@ -2186,9 +2321,10 @@ function renderHUD() {
   const sorted = Object.entries(snapshot.players).sort(([,a],[,b]) => b.kills-a.kills || a.deaths-b.deaths);
   scoreboardEl.innerHTML = `<div class="sb-header-row"><span class="sb-col-name">Player</span><span class="sb-col-k">K</span><span class="sb-col-d">D</span></div>` +
     sorted.map(([id, p]) => {
-      const buffCount = p.buffs ? Object.values(p.buffs).reduce((a,b)=>a+b,0) : 0;
+      const streak = p.killsThisLife || 0;
+      const streakBadge = streak >= 3 ? ` <span style="color:#f39c12;font-size:10px">${streak}</span>` : '';
       return `<div class="sb-row" style="${id===myPlayerId?'color:#fff;font-weight:600':''}">
-      <span class="sb-name" style="color:${p.color}">${escapeHtml(p.name)}${buffCount ? ` <span style="color:#888;font-size:10px">[${buffCount}]</span>` : ''}</span>
+      <span class="sb-name" style="color:${p.color}">${escapeHtml(p.name)}${streakBadge}</span>
       <span class="sb-kills">${p.kills}</span>
       <span class="sb-deaths">${p.deaths}</span>
     </div>`;
@@ -2198,7 +2334,9 @@ function renderHUD() {
   killNotifications = killNotifications.filter(n => now - n.time < 3500);
   killFeedEl.innerHTML = killNotifications.map(n => {
     const age = now - n.time, op = age > 2500 ? 1-(age-2500)/1000 : 1;
-    return `<div class="kill-msg${n.isMyKill?' my-kill':''}" style="opacity:${op.toFixed(2)}">${escapeHtml(n.text)}</div>`;
+    const cls = n.isMyKill ? ' my-kill' : n.isBuff ? '' : '';
+    const style = n.isBuff ? `opacity:${op.toFixed(2)};color:#f39c12;background:rgba(243,156,18,0.1)` : `opacity:${op.toFixed(2)}`;
+    return `<div class="kill-msg${cls}" style="${style}">${escapeHtml(n.text)}</div>`;
   }).join('');
 }
 
