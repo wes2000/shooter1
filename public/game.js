@@ -1470,14 +1470,21 @@ function selectBuff(buffId) {
   buffPickerChoices = null;
 }
 
+let _lastBuffPickerKey = null;
 function renderBuffPicker() {
   const el = $('buffSelection');
   if (!buffPickerChoices || !snapshot || !snapshot.players[myPlayerId]) {
     el.style.display = 'none';
+    _lastBuffPickerKey = null;
     return;
   }
   const me = snapshot.players[myPlayerId];
-  if (me.alive) { el.style.display = 'none'; return; }
+  if (me.alive) { el.style.display = 'none'; _lastBuffPickerKey = null; return; }
+
+  // Only rebuild DOM when choices change
+  const key = buffPickerChoices.join(',');
+  if (key === _lastBuffPickerKey) { el.style.display = 'flex'; return; }
+  _lastBuffPickerKey = key;
 
   el.style.display = 'flex';
   const isOffensive = me.buffChoicesOffensive;
@@ -1493,7 +1500,7 @@ function renderBuffPicker() {
     const stacks = (me.buffs && me.buffs[buffId]) || 0;
     const stackBadge = stacks > 0 ? `<div class="buff-stack-badge">x${stacks + 1}</div>` : '';
     const borderColor = isOffensive ? '#e74c3c' : '#3498db';
-    cardsHtml += `<div class="buff-card" data-buff="${buffId}" style="border-color:${borderColor}" onclick="selectBuff('${buffId}')">
+    cardsHtml += `<div class="buff-card" data-buff="${buffId}" style="border-color:${borderColor}">
       ${stackBadge}
       <div class="buff-card-name">${escapeHtml(def.name)}</div>
       <div class="buff-card-desc">${escapeHtml(def.desc)}</div>
@@ -1502,6 +1509,13 @@ function renderBuffPicker() {
   }
   cardsHtml += `</div>`;
   el.innerHTML = cardsHtml;
+
+  // Attach click handlers after DOM is built
+  el.querySelectorAll('.buff-card').forEach(card => {
+    card.addEventListener('click', () => {
+      selectBuff(card.dataset.buff);
+    });
+  });
 }
 
 function renderBuffBar() {
