@@ -69,6 +69,44 @@
     .btn-gray { background: #555; color: #fff; }
     .btn-yellow { background: #f39c12; color: #fff; }
 
+    /* Public Game Toggle */
+    .public-toggle {
+      display: flex; align-items: center; gap: 8px;
+      margin-top: 4px; margin-bottom: 4px; font-size: 14px; color: #aaa;
+    }
+    .public-toggle input[type="checkbox"] {
+      width: 16px; height: 16px; accent-color: #3498db; cursor: pointer;
+    }
+    .public-toggle label { cursor: pointer; }
+
+    /* Server List */
+    .server-list-section {
+      margin-top: 24px; width: 460px; text-align: center;
+    }
+    .server-list-header {
+      font-size: 14px; color: #888; letter-spacing: 2px; font-weight: 600;
+      margin-bottom: 8px; text-transform: uppercase;
+    }
+    #serverList {
+      background: #151530; border: 1px solid #333; border-radius: 8px;
+      max-height: 220px; overflow-y: auto;
+    }
+    .sl-empty {
+      padding: 20px; color: #555; font-size: 13px;
+    }
+    .sl-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 14px; border-bottom: 1px solid #222;
+      gap: 10px;
+    }
+    .sl-row:last-child { border-bottom: none; }
+    .sl-host { font-weight: 600; color: #eee; min-width: 100px; text-align: left; }
+    .sl-players { color: #aaa; font-size: 13px; min-width: 70px; }
+    .sl-status { font-size: 11px; padding: 2px 8px; border-radius: 4px; min-width: 60px; text-align: center; }
+    .sl-lobby { background: rgba(46,204,113,0.15); color: #2ecc71; }
+    .sl-playing { background: rgba(231,76,60,0.15); color: #e74c3c; }
+    .sl-join { padding: 4px 14px; font-size: 12px; }
+
     #joinScreen { background: linear-gradient(135deg, #0a0a2e 0%, #1a1a3e 100%); }
     #joinScreen h2 { margin-bottom: 20px; font-size: 32px; }
     #codeInput {
@@ -304,9 +342,17 @@
     <h1>SHOOTER</h1>
     <div class="subtitle">Multiplayer 2D Arena</div>
     <input type="text" id="nameInput" placeholder="Enter your name" maxlength="16" />
+    <div class="public-toggle">
+      <input type="checkbox" id="publicToggle" />
+      <label for="publicToggle">Public Game</label>
+    </div>
     <div class="btn-row">
       <button class="btn btn-green" id="createBtn">Create Game</button>
       <button class="btn btn-primary" id="joinBtn">Join Game</button>
+    </div>
+    <div class="server-list-section">
+      <div class="server-list-header">Public Games</div>
+      <div id="serverList"><div class="sl-empty">No public games</div></div>
     </div>
   </div>
 

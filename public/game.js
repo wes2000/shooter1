@@ -64,7 +64,7 @@ const WEAPONS = {
 // ========================
 // BUFF SYSTEM
 // ========================
-const BASE_SPEED_MULT = 0.80;    // -20% baseline movement speed nerf
+const BASE_SPEED_MULT = 0.88;    // ~12% baseline movement speed nerf
 const BASE_FIRERATE_MULT = 0.75; // -25% baseline fire rate nerf (cooldowns are longer)
 const BUFF_PICK_COUNT = 3;
 
@@ -283,6 +283,9 @@ let inputInterval = null;
 let gameRunning = false;
 let killNotifications = [];
 let buffPickerChoices = null; // client-side: array of buff IDs to display
+let isPublicGame = false;
+let heartbeatInterval = null;
+let serverListInterval = null;
 
 // ========================
 // HELPERS
@@ -292,7 +295,12 @@ function generateRoomCode() {
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; let r = '';
   for (let i = 0; i < 4; i++) r += c[Math.floor(Math.random() * c.length)]; return r;
 }
-function showScreen(name) { for (const k in screens) screens[k].classList.remove('active'); screens[name].classList.add('active'); currentScreen = name; }
+function showScreen(name) {
+  for (const k in screens) screens[k].classList.remove('active');
+  screens[name].classList.add('active');
+  currentScreen = name;
+  if (name === 'start') startServerListPolling();
+}
 function setStatus(el, msg, err) { el.textContent = msg; el.className = 'status-msg' + (err ? ' error' : ''); }
 function circleRectOverlap(cx, cy, r, w) { const nx = Math.max(w.x, Math.min(cx, w.x+w.w)), ny = Math.max(w.y, Math.min(cy, w.y+w.h)), dx = cx-nx, dy = cy-ny; return dx*dx+dy*dy < r*r; }
 function pointInRect(px, py, w) { return px >= w.x && px <= w.x+w.w && py >= w.y && py <= w.y+w.h; }
@@ -334,6 +342,13 @@ function createRoom() {
     updateRoomDisplay();
     showScreen('room');
     setStatus(roomStatus, '');
+    // Register public game
+    if (isPublicGame) {
+      registerPublicGame();
+      heartbeatInterval = setInterval(() => {
+        fetch('/api/games/' + roomCode + '/heartbeat', { method: 'POST' }).catch(() => {});
+      }, 15000);
+    }
   });
 
   peer.on('connection', (conn) => {
@@ -347,6 +362,7 @@ function createRoom() {
         conn.send({ type: 'joined', yourId: pid });
         broadcastLobbyState();
         updateRoomDisplay();
+        updatePublicPlayerCount();
       }
       if (data.type === 'ready' && pid && lobbyPlayers[pid]) {
         lobbyPlayers[pid].ready = !lobbyPlayers[pid].ready;
@@ -375,6 +391,7 @@ function createRoom() {
           gameState.shieldWalls = gameState.shieldWalls.filter(s => s.ownerId !== pid);
         }
         broadcastLobbyState(); updateRoomDisplay();
+        updatePublicPlayerCount();
       }
     });
   });
@@ -1091,6 +1108,7 @@ function getSnapshot() {
       buffChoicesOffensive: p.gotKillThisLife,
       shieldHp: p.shieldHp,
       shieldMax: p.shieldMax,
+      respawnCountdown: (!p.alive && p.respawnTimer) ? Math.max(0, (p.respawnTimer - now) / 1000) : 0,
       spawnShielded: p.spawnShieldEnd && now < p.spawnShieldEnd,
       tracked: p.trackedUntil && now < p.trackedUntil,
     };
@@ -1113,6 +1131,7 @@ function startGameHost() {
   gameState = createGameState();
   gameRunning = true; killNotifications = [];
   for (const conn of Object.values(hostConns)) { try { conn.send({ type: 'gameStarted' }); } catch(e) {} }
+  updatePublicPlayerCount();
 
   gameLoopInterval = setInterval(() => {
     const me = gameState.players['0'];
@@ -1151,6 +1170,11 @@ function cleanupGame() {
   gameRunning = false;
   if (gameLoopInterval) { clearInterval(gameLoopInterval); gameLoopInterval = null; }
   if (inputInterval) { clearInterval(inputInterval); inputInterval = null; }
+  if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+  // Deregister public game
+  if (isHost && isPublicGame && roomCode) {
+    fetch('/api/games/' + roomCode, { method: 'DELETE' }).catch(() => {});
+  }
   for (const conn of Object.values(hostConns)) { try { conn.close(); } catch(e) {} }
   if (hostConn) { try { hostConn.close(); } catch(e) {} }
   if (peer) { try { peer.destroy(); } catch(e) {} }
@@ -1159,6 +1183,72 @@ function cleanupGame() {
   keys = { up: false, down: false, left: false, right: false }; mouseDown = false;
   killNotifications = [];
   buffPickerChoices = null;
+  isPublicGame = false;
+}
+
+// ========================
+// PUBLIC GAME HELPERS
+// ========================
+function registerPublicGame() {
+  fetch('/api/games', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: roomCode, hostName: myName, playerCount: Object.keys(lobbyPlayers).length }),
+  }).catch(() => {});
+}
+
+function updatePublicPlayerCount() {
+  if (!isPublicGame || !roomCode) return;
+  const count = Object.keys(lobbyPlayers).length;
+  fetch('/api/games/' + roomCode, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ playerCount: count, status: gameRunning ? 'playing' : 'lobby' }),
+  }).catch(() => {});
+}
+
+function fetchServerList() {
+  fetch('/api/games')
+    .then(r => r.json())
+    .then(games => renderServerList(games))
+    .catch(() => renderServerList([]));
+}
+
+function renderServerList(games) {
+  const el = $('serverList');
+  if (!el) return;
+  if (games.length === 0) {
+    el.innerHTML = '<div class="sl-empty">No public games available</div>';
+    return;
+  }
+  el.innerHTML = games.map(g => {
+    const statusText = g.status === 'playing' ? 'In Game' : 'In Lobby';
+    const statusClass = g.status === 'playing' ? 'sl-playing' : 'sl-lobby';
+    return `<div class="sl-row">
+      <span class="sl-host">${escapeHtml(g.hostName)}</span>
+      <span class="sl-players">${g.playerCount} player${g.playerCount !== 1 ? 's' : ''}</span>
+      <span class="sl-status ${statusClass}">${statusText}</span>
+      <button class="btn btn-primary sl-join" onclick="joinFromList('${escapeHtml(g.code)}')">Join</button>
+    </div>`;
+  }).join('');
+}
+
+function joinFromList(code) {
+  myName = nameInput.value.trim() || 'Player';
+  joinRoom(code);
+}
+
+function startServerListPolling() {
+  fetchServerList();
+  if (serverListInterval) clearInterval(serverListInterval);
+  serverListInterval = setInterval(() => {
+    if (currentScreen === 'start') fetchServerList();
+    else { clearInterval(serverListInterval); serverListInterval = null; }
+  }, 3000);
+}
+
+function stopServerListPolling() {
+  if (serverListInterval) { clearInterval(serverListInterval); serverListInterval = null; }
 }
 
 // ========================
@@ -1565,6 +1655,11 @@ function renderHUD() {
     } else {
       deathOverlay.style.display = 'block';
       $('buffSelection').style.display = 'none';
+      if (me.respawnCountdown > 0) {
+        deathOverlay.textContent = `YOU DIED \u2014 ${Math.ceil(me.respawnCountdown)}`;
+      } else {
+        deathOverlay.textContent = 'YOU DIED \u2014 respawning...';
+      }
     }
   } else {
     deathOverlay.style.display = 'none';
@@ -1613,8 +1708,13 @@ function renderHUD() {
 // ========================
 // UI EVENT LISTENERS
 // ========================
-$('createBtn').addEventListener('click', () => { myName = nameInput.value.trim() || 'Player'; createRoom(); });
-$('joinBtn').addEventListener('click', () => { myName = nameInput.value.trim() || 'Player'; setStatus(joinStatus, ''); $('connectBtn').disabled = false; showScreen('join'); });
+$('createBtn').addEventListener('click', () => {
+  myName = nameInput.value.trim() || 'Player';
+  isPublicGame = $('publicToggle').checked;
+  stopServerListPolling();
+  createRoom();
+});
+$('joinBtn').addEventListener('click', () => { myName = nameInput.value.trim() || 'Player'; stopServerListPolling(); setStatus(joinStatus, ''); $('connectBtn').disabled = false; showScreen('join'); });
 nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('createBtn').click(); });
 $('connectBtn').addEventListener('click', () => { joinRoom(codeInput.value); });
 codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('connectBtn').click(); });
@@ -1642,3 +1742,6 @@ document.querySelectorAll('.class-card').forEach(card => {
     }
   });
 });
+
+// Start server list polling on load
+startServerListPolling();
