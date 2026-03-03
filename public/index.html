@@ -79,6 +79,19 @@
     }
     .public-toggle label { cursor: pointer; }
 
+    /* Bot Selector */
+    .bot-selector {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 4px; margin-bottom: 4px; font-size: 14px; color: #aaa;
+    }
+    .bot-selector label { font-weight: 600; }
+    .bot-selector input[type="range"] {
+      width: 140px; accent-color: #3498db; cursor: pointer;
+    }
+    .bot-selector span {
+      font-weight: 700; color: #eee; min-width: 16px; text-align: center;
+    }
+
     /* Server List */
     .server-list-section {
       margin-top: 24px; width: 460px; text-align: center;
@@ -407,6 +420,11 @@
     <div class="public-toggle">
       <input type="checkbox" id="publicToggle" />
       <label for="publicToggle">Public Game</label>
+    </div>
+    <div class="bot-selector">
+      <label for="botCount">Bots:</label>
+      <input type="range" id="botCount" min="0" max="8" value="0" />
+      <span id="botCountLabel">0</span>
     </div>
     <div class="btn-row">
       <button class="btn btn-green" id="createBtn">Create Game</button>

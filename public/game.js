@@ -126,6 +126,25 @@ const SPRINT_DRAIN = 1;
 const SPRINT_RECHARGE = 0.5; // ~4s full recharge
 const SPRINT_SPEED_BONUS = 1.15;
 
+// Killstreak buff bonus tiers
+const STREAK_TIERS = [
+  { kills: 10, bonus: 0.75 },
+  { kills: 7, bonus: 0.50 },
+  { kills: 5, bonus: 0.30 },
+  { kills: 3, bonus: 0.15 },
+];
+
+function getStreakBonus(kills) {
+  for (const tier of STREAK_TIERS) {
+    if (kills >= tier.kills) return tier.bonus;
+  }
+  return 0;
+}
+
+function effCount(p, id) {
+  return (p.buffs[id] || 0) + ((p.buffBonuses && p.buffBonuses[id]) || 0);
+}
+
 function generateBuffChoices(isOffensive) {
   const pool = isOffensive ? [...OFFENSIVE_BUFF_IDS] : [...DEFENSIVE_BUFF_IDS];
   const choices = [];
@@ -140,55 +159,64 @@ function applyBuff(p, buffId) {
   if (!BUFF_DEFS[buffId]) return;
   if (!p.buffs[buffId]) p.buffs[buffId] = 0;
   p.buffs[buffId]++;
-  // Immediate effects for HP-changing buffs
-  if (buffId === 'thick_skin') { p.maxHp += 20; p.hp = Math.min(p.hp + 20, p.maxHp); }
-  if (buffId === 'juggernaut') { p.maxHp += 30; p.hp = Math.min(p.hp + 30, p.maxHp); }
-  if (buffId === 'glass_cannon') { p.maxHp = Math.max(10, p.maxHp - 15); p.hp = Math.min(p.hp, p.maxHp); }
-  if (buffId === 'energy_shield') { p.shieldHp += 25; p.shieldMax += 25; }
+  // Killstreak bonus: add fractional bonus stacks
+  const streakBonus = getStreakBonus(p.lastLifeKills);
+  if (streakBonus > 0) {
+    if (!p.buffBonuses) p.buffBonuses = {};
+    if (!p.buffBonuses[buffId]) p.buffBonuses[buffId] = 0;
+    p.buffBonuses[buffId] += streakBonus;
+  }
+  // Immediate effects for HP-changing buffs (scaled by streak)
+  const mult = 1 + streakBonus;
+  if (buffId === 'thick_skin') { const amt = Math.round(20 * mult); p.maxHp += amt; p.hp = Math.min(p.hp + amt, p.maxHp); }
+  if (buffId === 'juggernaut') { const amt = Math.round(30 * mult); p.maxHp += amt; p.hp = Math.min(p.hp + amt, p.maxHp); }
+  if (buffId === 'glass_cannon') { const amt = Math.round(15 * mult); p.maxHp = Math.max(10, p.maxHp - amt); p.hp = Math.min(p.hp, p.maxHp); }
+  if (buffId === 'energy_shield') { const amt = Math.round(25 * mult); p.shieldHp += amt; p.shieldMax += amt; }
 }
 
 function getBuffStats(p) {
   const b = p.buffs;
+  const e = (id) => effCount(p, id);
   const now = Date.now();
   // Speed
   let speedMult = BASE_SPEED_MULT;
-  speedMult *= Math.pow(1.12, (b.lead_boots || 0) + (b.quick_feet || 0));
-  if (b.juggernaut) speedMult *= Math.pow(0.92, b.juggernaut);
-  if (b.momentum && p.lastDamageTaken && (now - p.lastDamageTaken > 4000)) speedMult *= 1 + 0.25 * b.momentum;
+  speedMult *= Math.pow(1.12, e('lead_boots') + e('quick_feet'));
+  if (b.juggernaut) speedMult *= Math.pow(0.92, e('juggernaut'));
+  if (b.momentum && p.lastDamageTaken && (now - p.lastDamageTaken > 4000)) speedMult *= 1 + 0.25 * e('momentum');
   if (b.evasion_streak && p.lastDamageTaken) {
     const secsSafe = (now - p.lastDamageTaken) / 1000;
-    speedMult *= 1 + Math.min(0.30 * b.evasion_streak, secsSafe * 0.03 * b.evasion_streak);
+    speedMult *= 1 + Math.min(0.30 * e('evasion_streak'), secsSafe * 0.03 * e('evasion_streak'));
   }
   if (p.adrenalineEnd && now < p.adrenalineEnd) speedMult *= 1.40;
   // Fire rate
   let fireRateMult = BASE_FIRERATE_MULT;
-  if (b.quick_draw) fireRateMult *= Math.pow(1.15, b.quick_draw);
+  if (b.quick_draw) fireRateMult *= Math.pow(1.15, e('quick_draw'));
   if (p.adrenalineEnd && now < p.adrenalineEnd) fireRateMult *= 1.25;
-  if (b.last_stand && p.hp <= p.maxHp * 0.30) fireRateMult *= 1 + 0.15 * b.last_stand;
+  if (b.last_stand && p.hp <= p.maxHp * 0.30) fireRateMult *= 1 + 0.15 * e('last_stand');
   // Damage
   let damageMult = 1.0;
-  if (b.heavy_rounds) damageMult *= Math.pow(1.20, b.heavy_rounds);
-  if (b.glass_cannon) damageMult *= Math.pow(1.35, b.glass_cannon);
-  if (b.hot_streak && p.killsThisLife >= 3) damageMult *= 1 + 0.30 * b.hot_streak;
-  if (b.last_stand && p.hp <= p.maxHp * 0.30) damageMult *= 1 + 0.20 * b.last_stand;
+  if (b.heavy_rounds) damageMult *= Math.pow(1.20, e('heavy_rounds'));
+  if (b.glass_cannon) damageMult *= Math.pow(1.35, e('glass_cannon'));
+  if (b.hot_streak && p.killsThisLife >= 3) damageMult *= 1 + 0.30 * e('hot_streak');
+  if (b.last_stand && p.hp <= p.maxHp * 0.30) damageMult *= 1 + 0.20 * e('last_stand');
   // Reload
   let reloadMult = 1.0;
-  if (b.fast_hands) reloadMult *= Math.pow(0.75, b.fast_hands);
+  if (b.fast_hands) reloadMult *= Math.pow(0.75, e('fast_hands'));
   // Clip
   let clipMult = 1.0;
-  if (b.expanded_mags) clipMult *= Math.pow(1.50, b.expanded_mags);
+  if (b.expanded_mags) clipMult *= Math.pow(1.50, e('expanded_mags'));
   // Ability CD
   let abilityCdMult = 1.0;
-  if (b.overcharge) abilityCdMult *= Math.pow(0.80, b.overcharge);
-  if (b.ability_recharge) abilityCdMult *= Math.pow(0.80, b.ability_recharge);
+  if (b.overcharge) abilityCdMult *= Math.pow(0.80, e('overcharge'));
+  if (b.ability_recharge) abilityCdMult *= Math.pow(0.80, e('ability_recharge'));
   // Bullet speed
   let bulletSpeedMult = 1.0;
-  if (b.gunslinger) bulletSpeedMult *= Math.pow(1.25, b.gunslinger);
+  if (b.gunslinger) bulletSpeedMult *= Math.pow(1.25, e('gunslinger'));
   // Extra bounces
-  let extraBounces = (b.ricochet_master || 0);
+  let extraBounces = Math.floor(e('ricochet_master'));
   // Damage reduction
   let dmgReduction = 0;
-  if (b.fortify && p.lastMoveTime && (now - p.lastMoveTime > 1000)) dmgReduction += 0.25 * b.fortify;
+  if (b.fortify && p.lastMoveTime && (now - p.lastMoveTime > 1000)) dmgReduction += 0.25 * e('fortify');
   // Slow factor (from being hit by hollow points)
   let slowFactor = 1.0;
   if (p.slowEnd && now < p.slowEnd && !(b.iron_boots)) slowFactor = 0.70;
@@ -198,7 +226,7 @@ function getBuffStats(p) {
 
 function getRespawnTime(p) {
   let t = RESPAWN_TIME;
-  if (p.buffs.phoenix_aura) t *= Math.pow(0.60, p.buffs.phoenix_aura);
+  if (p.buffs.phoenix_aura) t *= Math.pow(0.60, effCount(p, 'phoenix_aura'));
   return Math.max(500, t);
 }
 
@@ -294,6 +322,10 @@ let buffPickerChoices = null; // client-side: array of buff IDs to display
 let isPublicGame = false;
 let heartbeatInterval = null;
 let serverListInterval = null;
+let botCount = 0;
+
+const BOT_NAMES = ['Razor', 'Viper', 'Ghost', 'Blaze', 'Apex', 'Shadow', 'Neon', 'Havoc', 'Storm', 'Cipher'];
+const BOT_CLASSES = ['tank', 'scout', 'engineer', 'ghost'];
 
 // Touch controls
 const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
@@ -354,6 +386,15 @@ function createRoom() {
     isHost = true;
     myPlayerId = '0';
     lobbyPlayers = { '0': { name: myName, ready: true, playerClass: selectedClass } };
+    // Add bots to lobby
+    for (let i = 0; i < botCount; i++) {
+      lobbyPlayers['bot' + i] = {
+        name: BOT_NAMES[i % BOT_NAMES.length],
+        ready: true,
+        playerClass: BOT_CLASSES[i % BOT_CLASSES.length],
+        isBot: true,
+      };
+    }
     roomCodeEl.textContent = roomCode;
     $('startGameBtn').style.display = 'inline-block';
     updateRoomDisplay();
@@ -422,7 +463,7 @@ function createRoom() {
 function broadcastLobbyState() {
   const state = { type: 'lobbyState', roomCode, players: {}, hostId: '0' };
   for (const [id, p] of Object.entries(lobbyPlayers)) {
-    state.players[id] = { name: p.name, ready: p.ready, isHost: id === '0', playerClass: p.playerClass };
+    state.players[id] = { name: p.name, ready: p.ready, isHost: id === '0', playerClass: p.playerClass, isBot: !!p.isBot };
   }
   for (const conn of Object.values(hostConns)) { try { conn.send(state); } catch(e) {} }
 }
@@ -486,6 +527,7 @@ function updateRoomDisplay() {
         <span class="pname">${escapeHtml(p.name)}</span>
         <span class="class-badge">${cls.name}</span>
         ${(p.isHost || id === '0') ? '<span class="host-tag">HOST</span>' : ''}
+        ${p.isBot ? '<span class="host-tag" style="color:#888">BOT</span>' : ''}
       </span>
       <span class="ready-tag ${p.ready ? 'yes' : 'no'}">${p.ready ? 'Ready' : 'Not Ready'}</span>
     </div>`;
@@ -513,8 +555,10 @@ function initPlayer(id, x, y, colorIdx) {
     // Buff system
     buffs: {},
     killsThisLife: 0,
+    lastLifeKills: 0,
     gotKillThisLife: false,
     pendingBuffChoices: null,
+    buffBonuses: {},
     // Buff tracking state
     lastDamageTaken: 0,
     lastMoveTime: 0,
@@ -534,8 +578,6 @@ function initPlayer(id, x, y, colorIdx) {
 }
 
 function createGameState() {
-  // Add a bot to lobby
-  lobbyPlayers['bot1'] = { name: 'BOT', ready: true, playerClass: 'tank' };
   const state = {
     players: {}, bullets: [], bulletIdCounter: 0,
     pickups: PICKUP_DEFS.map((d, i) => ({ id: i, x: d.x, y: d.y, type: d.type, active: true, respawnTime: 0 })),
@@ -549,41 +591,168 @@ function createGameState() {
     const a = (2 * Math.PI * i) / ids.length;
     state.players[id] = initPlayer(id, MAP_W/2 + Math.cos(a)*300, MAP_H/2 + Math.sin(a)*300, i);
   });
-  // Mark bot
-  state.players['bot1'].isBot = true;
+  // Mark bots with AI state
+  for (const pid in state.players) {
+    if (lobbyPlayers[pid] && lobbyPlayers[pid].isBot) {
+      state.players[pid].isBot = true;
+      state.players[pid].botState = {
+        targetId: null,
+        wanderAngle: Math.random() * Math.PI * 2,
+        wanderChangeTime: 0,
+        strafeDir: 1,
+        strafeChangeTime: 0,
+        engageRange: 250 + Math.random() * 150,
+        retreatHpPct: 0.2 + Math.random() * 0.15,
+        aimJitter: 0.06 + Math.random() * 0.06,
+        reactionDelay: 150 + Math.random() * 200,
+        lastSawEnemy: 0,
+        abilityUseTime: 0,
+      };
+    }
+  }
   return state;
 }
 
 function updateBots(now) {
   for (const id in gameState.players) {
     const bot = gameState.players[id];
-    if (!bot.isBot || !bot.alive) {
-      // Bot auto-picks a buff when pending
-      if (bot && bot.isBot && !bot.alive && Array.isArray(bot.pendingBuffChoices)) {
+    if (!bot.isBot) continue;
+
+    // Dead bot: auto-pick buff
+    if (!bot.alive) {
+      if (Array.isArray(bot.pendingBuffChoices)) {
         const pick = bot.pendingBuffChoices[Math.floor(Math.random() * bot.pendingBuffChoices.length)];
         handleSelectBuff(id, pick);
       }
       continue;
     }
-    // Find nearest player
+
+    const bs = bot.botState;
+    if (!bs) continue;
+
+    // Find nearest visible enemy
     let nearest = null, nearDist = Infinity;
+    let nearestId = null;
     for (const pid in gameState.players) {
       if (pid === id) continue;
       const p = gameState.players[pid];
       if (!p.alive || p.cloaked) continue;
-      const d = Math.sqrt((p.x - bot.x)**2 + (p.y - bot.y)**2);
-      if (d < nearDist) { nearDist = d; nearest = p; }
+      // Skip other bots' corpses
+      const d = Math.sqrt((p.x - bot.x) ** 2 + (p.y - bot.y) ** 2);
+      if (d < nearDist) { nearDist = d; nearest = p; nearestId = pid; }
     }
-    // Aim + shoot at nearest, don't move
-    bot.input = { up: false, down: false, left: false, right: false };
-    if (nearest && nearDist < 500) {
-      bot.angle = Math.atan2(nearest.y - bot.y, nearest.x - bot.x);
-      bot.shooting = true;
+
+    // Reset input each tick
+    bot.input = { up: false, down: false, left: false, right: false, sprint: false };
+    bot.shooting = false;
+
+    const hpPct = bot.hp / bot.maxHp;
+    const isLowHp = hpPct <= bs.retreatHpPct;
+
+    // === STATE: Has a target in range ===
+    if (nearest && nearDist < 600) {
+      bs.lastSawEnemy = now;
+      bs.targetId = nearestId;
+
+      // Aim at target with jitter
+      const aimAngle = Math.atan2(nearest.y - bot.y, nearest.x - bot.x);
+      bot.angle = aimAngle + (Math.random() - 0.5) * bs.aimJitter;
+
+      // Shoot if in range and enough reaction time
+      if (nearDist < 500) {
+        bot.shooting = true;
+      }
+
+      // Movement: strafe around target at preferred engage range
+      if (now > bs.strafeChangeTime) {
+        bs.strafeDir = Math.random() < 0.5 ? 1 : -1;
+        bs.strafeChangeTime = now + 800 + Math.random() * 1200;
+      }
+
+      // Strafe perpendicular to target
+      const strafeAngle = aimAngle + (Math.PI / 2) * bs.strafeDir;
+
+      if (isLowHp) {
+        // Retreat: move away from target
+        const fleeAngle = aimAngle + Math.PI;
+        bot.input.up = Math.sin(fleeAngle) < -0.3;
+        bot.input.down = Math.sin(fleeAngle) > 0.3;
+        bot.input.left = Math.cos(fleeAngle) < -0.3;
+        bot.input.right = Math.cos(fleeAngle) > 0.3;
+        bot.input.sprint = true;
+      } else if (nearDist < bs.engageRange * 0.6) {
+        // Too close: back up while strafing
+        const backAngle = aimAngle + Math.PI + (Math.PI / 6) * bs.strafeDir;
+        bot.input.up = Math.sin(backAngle) < -0.3;
+        bot.input.down = Math.sin(backAngle) > 0.3;
+        bot.input.left = Math.cos(backAngle) < -0.3;
+        bot.input.right = Math.cos(backAngle) > 0.3;
+      } else if (nearDist > bs.engageRange * 1.2) {
+        // Too far: close in while strafing
+        const approachAngle = aimAngle + (Math.PI / 6) * bs.strafeDir;
+        bot.input.up = Math.sin(approachAngle) < -0.3;
+        bot.input.down = Math.sin(approachAngle) > 0.3;
+        bot.input.left = Math.cos(approachAngle) < -0.3;
+        bot.input.right = Math.cos(approachAngle) > 0.3;
+      } else {
+        // Good range: pure strafe
+        bot.input.up = Math.sin(strafeAngle) < -0.3;
+        bot.input.down = Math.sin(strafeAngle) > 0.3;
+        bot.input.left = Math.cos(strafeAngle) < -0.3;
+        bot.input.right = Math.cos(strafeAngle) > 0.3;
+      }
+
+      // Use ability when in combat
+      if (now > bs.abilityUseTime) {
+        const cls = CLASS_DEFS[bot.playerClass];
+        const bsStats = getBuffStats(bot);
+        const effectiveCd = cls.cooldown * bsStats.abilityCdMult;
+        if (now - bot.abilityCdStart >= effectiveCd) {
+          // Use ability based on class + situation
+          let useAbility = false;
+          if (bot.playerClass === 'tank' && nearDist < 200) useAbility = true;
+          else if (bot.playerClass === 'scout' && (isLowHp || nearDist > 300)) useAbility = true;
+          else if (bot.playerClass === 'engineer' && nearDist < 400) useAbility = true;
+          else if (bot.playerClass === 'ghost' && (isLowHp || nearDist < 250)) useAbility = true;
+          if (useAbility) {
+            activateAbility(bot, id, now);
+            bs.abilityUseTime = now + 2000; // Don't spam ability checks
+          }
+        }
+      }
+
+    // === STATE: No target — wander ===
     } else {
+      bs.targetId = null;
       bot.shooting = false;
+
+      // Change wander direction periodically
+      if (now > bs.wanderChangeTime) {
+        bs.wanderAngle = Math.random() * Math.PI * 2;
+        bs.wanderChangeTime = now + 2000 + Math.random() * 3000;
+      }
+
+      // Steer away from map edges
+      if (bot.x < 150) bs.wanderAngle = 0;
+      else if (bot.x > MAP_W - 150) bs.wanderAngle = Math.PI;
+      if (bot.y < 150) bs.wanderAngle = Math.PI / 2;
+      else if (bot.y > MAP_H - 150) bs.wanderAngle = -Math.PI / 2;
+
+      bot.angle = bs.wanderAngle;
+      bot.input.up = Math.sin(bs.wanderAngle) < -0.3;
+      bot.input.down = Math.sin(bs.wanderAngle) > 0.3;
+      bot.input.left = Math.cos(bs.wanderAngle) < -0.3;
+      bot.input.right = Math.cos(bs.wanderAngle) > 0.3;
+
+      // Sprint while wandering sometimes
+      if (Math.random() < 0.3) bot.input.sprint = true;
     }
+
     // Auto-reload
     if (bot.ammo <= 0 && !bot.reloading) tryReload(bot, now);
+
+    // Pick up nearby weapons if current is pistol
+    // (handled by existing pickup collision in updateGame)
   }
 }
 
@@ -601,7 +770,7 @@ function activateAbility(p, id, now) {
   const effectiveCd = cls.cooldown * bs.abilityCdMult;
   if (!p.alive || now - p.abilityCdStart < effectiveCd) return;
   p.abilityCdStart = now;
-  const ampStacks = p.buffs.ability_amplifier || 0;
+  const ampStacks = effCount(p, 'ability_amplifier');
 
   switch (p.playerClass) {
     case 'tank': {
@@ -687,7 +856,7 @@ function triggerExplosion(x, y, ownerId, now, radius, dmg) {
     const dx = p.x-x, dy = p.y-y, dist = Math.sqrt(dx*dx+dy*dy);
     if (dist < radius) {
       let rawDmg = Math.round(dmg * (1 - dist/radius));
-      if (p.buffs.blast_resistant) rawDmg = Math.round(rawDmg * Math.pow(0.70, p.buffs.blast_resistant));
+      if (p.buffs.blast_resistant) rawDmg = Math.round(rawDmg * Math.pow(0.70, effCount(p, 'blast_resistant')));
       const bs = getBuffStats(p);
       rawDmg = Math.round(rawDmg * (1 - bs.dmgReduction));
       applyDamageToPlayer(p, pid, rawDmg, ownerId, 'explosive', now);
@@ -699,13 +868,13 @@ function applyDamageToPlayer(p, pid, damage, attackerId, weapon, now) {
   if (!p.alive) return;
   // Dodge Roll check
   if (p.buffs.dodge_roll && weapon !== 'explosive') {
-    const dodgeChance = 1 - Math.pow(0.88, p.buffs.dodge_roll);
+    const dodgeChance = 1 - Math.pow(0.88, effCount(p, 'dodge_roll'));
     if (Math.random() < dodgeChance) return;
   }
   // Bullet Sponge - consecutive hits deal less
   if (p.buffs.bullet_sponge && attackerId) {
     if (p.consecutiveHitTimer && now - p.consecutiveHitTimer < 2000) {
-      p.consecutiveHitCount = Math.min(4 * p.buffs.bullet_sponge, p.consecutiveHitCount + 1);
+      p.consecutiveHitCount = Math.min(4 * effCount(p, 'bullet_sponge'), p.consecutiveHitCount + 1);
     } else {
       p.consecutiveHitCount = 0;
     }
@@ -723,7 +892,7 @@ function applyDamageToPlayer(p, pid, damage, attackerId, weapon, now) {
   p.lastDamageTaken = now;
   // Thorn Armor - reflect damage
   if (p.buffs.thorn_armor && attackerId && gameState.players[attackerId] && attackerId !== pid) {
-    const reflect = Math.round(damage * 0.20 * p.buffs.thorn_armor);
+    const reflect = Math.round(damage * 0.20 * effCount(p, 'thorn_armor'));
     if (reflect > 0) {
       const attacker = gameState.players[attackerId];
       attacker.hp -= reflect;
@@ -746,6 +915,7 @@ function killPlayer(p, pid, killerId, weapon, now) {
   p.alive = false; p.deaths++;
   p.lastKilledBy = null;
   p.gotKillThisLife = p.killsThisLife > 0;
+  p.lastLifeKills = p.killsThisLife;
   p.killsThisLife = 0;
   p.respawnTimer = now + getRespawnTime(p);
   p.cloaked = false; p.dashing = false;
@@ -762,12 +932,12 @@ function killPlayer(p, pid, killerId, weapon, now) {
     gameState.killEvents.push({ killerId, killer: killer.name, victim: p.name, weapon });
     // Adrenaline Rush
     if (killer.buffs.adrenaline_rush) {
-      killer.adrenalineEnd = now + 4000 * killer.buffs.adrenaline_rush;
+      killer.adrenalineEnd = now + 4000 * effCount(killer, 'adrenaline_rush');
     }
     // Vampiric Rounds bonus on kill (none - vampiric is on-hit only)
     // Scavenger - drop health pack
     if (killer.buffs.scavenger) {
-      const healAmt = 25 * killer.buffs.scavenger;
+      const healAmt = 25 * effCount(killer, 'scavenger');
       gameState.pickups.push({
         id: gameState.pickups.length + 1000 + Math.floor(Math.random()*9000),
         x: p.x, y: p.y, type: 'health', active: true, respawnTime: 0,
@@ -875,10 +1045,10 @@ function updateGame() {
         p.consecutiveHitCount = 0;
         p.sprintFuel = SPRINT_MAX;
         // Spawn Shield
-        if (p.buffs.spawn_shield) p.spawnShieldEnd = now + 2500 * p.buffs.spawn_shield;
+        if (p.buffs.spawn_shield) p.spawnShieldEnd = now + 2500 * effCount(p, 'spawn_shield');
         // Field Medic - heal nearby allies
         if (p.buffs.field_medic) {
-          const healAmt = 30 * p.buffs.field_medic;
+          const healAmt = 30 * effCount(p, 'field_medic');
           for (const oid in gameState.players) {
             if (oid === id) continue;
             const op = gameState.players[oid];
@@ -948,7 +1118,7 @@ function updateGame() {
       const bulletSpeed = wep.speed * bs.bulletSpeedMult;
       const bulletBounces = wep.bounces + bs.extraBounces;
       const hasShrapnel = !!(p.buffs.shrapnel);
-      const shotsToFire = 1 + ((p.buffs.double_tap && Math.random() < 0.15 * p.buffs.double_tap) ? 1 : 0);
+      const shotsToFire = 1 + ((p.buffs.double_tap && Math.random() < 0.15 * effCount(p, 'double_tap')) ? 1 : 0);
       for (let shot = 0; shot < shotsToFire && p.ammo > 0; shot++) {
         for (let j = 0; j < wep.projectiles; j++) {
           const sa = p.angle + (wep.spread > 0 ? (Math.random()-0.5)*wep.spread*2 : 0);
@@ -977,11 +1147,11 @@ function updateGame() {
       if (pk.scavengerExpire && now > pk.scavengerExpire) {
         gameState.pickups.splice(pki, 1); continue;
       }
-      const pickupRange = PICKUP_RADIUS + PLAYER_R + (pk.type === 'health' && p.buffs.medics_instinct ? PICKUP_RADIUS * 0.5 * p.buffs.medics_instinct : 0);
+      const pickupRange = PICKUP_RADIUS + PLAYER_R + (pk.type === 'health' && p.buffs.medics_instinct ? PICKUP_RADIUS * 0.5 * effCount(p, 'medics_instinct') : 0);
       if (Math.sqrt((p.x-pk.x)**2 + (p.y-pk.y)**2) < pickupRange) {
         if (pk.type === 'health' && p.buffs.medics_instinct) {
           const healAmt = pk.scavengerHeal || 50;
-          p.hp = Math.min(p.maxHp, p.hp + Math.round(healAmt * (1 + 0.50 * p.buffs.medics_instinct)));
+          p.hp = Math.min(p.maxHp, p.hp + Math.round(healAmt * (1 + 0.50 * effCount(p, 'medics_instinct'))));
         } else {
           applyPickup(p, pk);
         }
@@ -995,7 +1165,7 @@ function updateGame() {
     // Regeneration
     if (p.buffs.regeneration && p.hp < p.maxHp) {
       if (!p.lastRegenTick || now - p.lastRegenTick >= 1000) {
-        p.hp = Math.min(p.maxHp, p.hp + 2 * p.buffs.regeneration);
+        p.hp = Math.min(p.maxHp, p.hp + 2 * effCount(p, 'regeneration'));
         p.lastRegenTick = now;
       }
     }
@@ -1069,21 +1239,21 @@ function updateGame() {
         if (owner) {
           // Vampiric Rounds
           if (owner.buffs.vampiric_rounds) {
-            const heal = Math.round(rawDmg * 0.15 * owner.buffs.vampiric_rounds);
+            const heal = Math.round(rawDmg * 0.15 * effCount(owner, 'vampiric_rounds'));
             owner.hp = Math.min(owner.maxHp, owner.hp + heal);
           }
           // Hollow Points - slow
           if (owner.buffs.hollow_points) {
-            p.slowEnd = now + 1500 * owner.buffs.hollow_points;
+            p.slowEnd = now + 1500 * effCount(owner, 'hollow_points');
           }
           // Tracker Rounds
           if (owner.buffs.tracker_rounds) {
-            p.trackedUntil = now + 3000 * owner.buffs.tracker_rounds;
+            p.trackedUntil = now + 3000 * effCount(owner, 'tracker_rounds');
           }
           // Bleed Out
           if (owner.buffs.bleed_out) {
             p.bleedEffects.push({
-              dps: 4 * owner.buffs.bleed_out,
+              dps: 4 * effCount(owner, 'bleed_out'),
               endTime: now + 3000,
               attackerId: b.ownerId,
               lastTick: 0,
@@ -1091,7 +1261,7 @@ function updateGame() {
           }
           // Chain Lightning
           if (owner.buffs.chain_lightning) {
-            let sparks = owner.buffs.chain_lightning;
+            let sparks = Math.floor(effCount(owner, 'chain_lightning'));
             const hitSet = new Set([pid, b.ownerId]);
             for (const eid in gameState.players) {
               if (sparks <= 0) break;
@@ -1162,6 +1332,7 @@ function getSnapshot() {
       buffs: { ...p.buffs },
       buffChoices: Array.isArray(p.pendingBuffChoices) ? p.pendingBuffChoices : null,
       buffChoicesOffensive: p.gotKillThisLife,
+      streakBonus: getStreakBonus(p.lastLifeKills),
       shieldHp: p.shieldHp,
       shieldMax: p.shieldMax,
       respawnCountdown: (!p.alive && p.respawnTimer) ? Math.max(0, (p.respawnTimer - now) / 1000) : 0,
@@ -1244,6 +1415,8 @@ function cleanupGame() {
   killNotifications = [];
   buffPickerChoices = null;
   isPublicGame = false;
+  // Remove bots from lobby
+  for (const id in lobbyPlayers) { if (lobbyPlayers[id].isBot) delete lobbyPlayers[id]; }
   joystickTouch = null;
   aimPadTouch = null;
   sprintToggle = false;
@@ -1869,8 +2042,12 @@ function renderBuffPicker() {
   const subtitle = isOffensive ? 'OFFENSIVE POWER' : 'DEFENSIVE POWER';
   const subtitleColor = isOffensive ? '#e74c3c' : '#3498db';
 
+  const streakBonus = me.streakBonus || 0;
   let cardsHtml = `<div class="buff-title">CHOOSE A BUFF</div>`;
   cardsHtml += `<div class="buff-subtitle" style="color:${subtitleColor}">${subtitle}</div>`;
+  if (streakBonus > 0) {
+    cardsHtml += `<div style="font-size:14px;font-weight:700;color:#f39c12;margin-bottom:12px;text-shadow:0 0 10px rgba(243,156,18,0.4)">KILLSTREAK BONUS: +${Math.round(streakBonus * 100)}% BUFF POWER</div>`;
+  }
   cardsHtml += `<div class="buff-cards">`;
   for (const buffId of buffPickerChoices) {
     const def = BUFF_DEFS[buffId];
@@ -1878,11 +2055,13 @@ function renderBuffPicker() {
     const stacks = (me.buffs && me.buffs[buffId]) || 0;
     const stackBadge = stacks > 0 ? `<div class="buff-stack-badge">x${stacks + 1}</div>` : '';
     const borderColor = isOffensive ? '#e74c3c' : '#3498db';
-    cardsHtml += `<div class="buff-card" data-buff="${buffId}" style="border-color:${borderColor}">
+    const streakTag = streakBonus > 0 ? `<div style="font-size:10px;font-weight:700;color:#f39c12;margin-top:6px">+${Math.round(streakBonus * 100)}% ENHANCED</div>` : '';
+    cardsHtml += `<div class="buff-card" data-buff="${buffId}" style="border-color:${streakBonus > 0 ? '#f39c12' : borderColor}${streakBonus > 0 ? ';box-shadow:0 0 12px rgba(243,156,18,0.25)' : ''}">
       ${stackBadge}
       <div class="buff-card-name">${escapeHtml(def.name)}</div>
       <div class="buff-card-desc">${escapeHtml(def.desc)}</div>
       ${stacks > 0 ? `<div class="buff-card-stacked">OWNED x${stacks}</div>` : ''}
+      ${streakTag}
     </div>`;
   }
   cardsHtml += `</div>`;
@@ -2026,9 +2205,15 @@ function renderHUD() {
 // ========================
 // UI EVENT LISTENERS
 // ========================
+// Bot count slider
+$('botCount').addEventListener('input', () => {
+  $('botCountLabel').textContent = $('botCount').value;
+});
+
 $('createBtn').addEventListener('click', () => {
   myName = nameInput.value.trim() || 'Player';
   isPublicGame = $('publicToggle').checked;
+  botCount = parseInt($('botCount').value) || 0;
   stopServerListPolling();
   createRoom();
 });
