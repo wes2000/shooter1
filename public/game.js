@@ -295,6 +295,15 @@ let isPublicGame = false;
 let heartbeatInterval = null;
 let serverListInterval = null;
 
+// Touch controls
+const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+let touchControlsActive = false;
+let joystickTouch = null;
+let aimPadTouch = null;
+let sprintToggle = false;
+const JOYSTICK_RADIUS = 60;
+const JOYSTICK_DEAD_ZONE = 12;
+
 // ========================
 // HELPERS
 // ========================
@@ -1204,6 +1213,7 @@ function startGameHost() {
   }, 1000 / TICK_RATE);
 
   showScreen('game'); resizeCanvas(); requestAnimationFrame(renderLoop);
+  initTouchControls();
 }
 
 function startGameClient() {
@@ -1213,6 +1223,7 @@ function startGameClient() {
     hostConn.send({ type: 'input', keys: { ...keys }, angle: Math.atan2(mouseY - canvas.height/2, mouseX - canvas.width/2), shooting: mouseDown });
   }, 1000 / TICK_RATE);
   showScreen('game'); resizeCanvas(); requestAnimationFrame(renderLoop);
+  initTouchControls();
 }
 
 function cleanupGame() {
@@ -1233,6 +1244,11 @@ function cleanupGame() {
   killNotifications = [];
   buffPickerChoices = null;
   isPublicGame = false;
+  joystickTouch = null;
+  aimPadTouch = null;
+  sprintToggle = false;
+  const touchEl = $('touchControls');
+  if (touchEl) touchEl.style.display = 'none';
 }
 
 // ========================
@@ -1330,9 +1346,180 @@ window.addEventListener('keyup', (e) => {
   }
 });
 window.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
-window.addEventListener('mousedown', (e) => { if (currentScreen === 'game' && e.button === 0 && !buffPickerChoices) mouseDown = true; });
+window.addEventListener('mousedown', (e) => {
+  if (touchControlsActive) return;
+  if (currentScreen === 'game' && e.button === 0 && !buffPickerChoices) mouseDown = true;
+});
 window.addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; });
 window.addEventListener('contextmenu', (e) => { if (currentScreen === 'game') e.preventDefault(); });
+
+// ========================
+// TOUCH CONTROLS
+// ========================
+function initTouchControls() {
+  if (!isTouchDevice) return;
+  const touchEl = $('touchControls');
+  if (!touchEl) return;
+  touchEl.style.display = 'block';
+  document.body.classList.add('touch-active');
+  touchControlsActive = true;
+
+  const gameScreen = $('gameScreen');
+  gameScreen.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+  gameScreen.addEventListener('touchstart', (e) => {
+    if (e.target.closest('#buffSelection')) return;
+    if (e.target.closest('#leaveBtn')) return;
+    e.preventDefault();
+  }, { passive: false });
+
+  setupJoystickZone();
+  setupAimPadZone();
+  setupTouchButtons();
+  $('abilityKey').textContent = 'TAP';
+}
+
+function setupJoystickZone() {
+  const zone = $('joystickZone');
+  const jCanvas = $('joystickCanvas');
+  const jCtx = jCanvas.getContext('2d');
+
+  zone.addEventListener('touchstart', (e) => {
+    if (joystickTouch !== null) return;
+    const t = e.changedTouches[0];
+    joystickTouch = { id: t.identifier, startX: t.clientX, startY: t.clientY, currentX: t.clientX, currentY: t.clientY };
+    jCanvas.style.display = 'block';
+    jCanvas.style.left = (t.clientX - 100) + 'px';
+    jCanvas.style.top = (t.clientY - 100) + 'px';
+    drawJoystick(jCtx, 100, 100, 0, 0);
+    updateMovementFromJoystick();
+  }, { passive: false });
+
+  zone.addEventListener('touchmove', (e) => {
+    for (const t of e.changedTouches) {
+      if (joystickTouch && t.identifier === joystickTouch.id) {
+        joystickTouch.currentX = t.clientX;
+        joystickTouch.currentY = t.clientY;
+        let dx = joystickTouch.currentX - joystickTouch.startX;
+        let dy = joystickTouch.currentY - joystickTouch.startY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > JOYSTICK_RADIUS) { dx = (dx / dist) * JOYSTICK_RADIUS; dy = (dy / dist) * JOYSTICK_RADIUS; }
+        drawJoystick(jCtx, 100, 100, dx, dy);
+        updateMovementFromJoystick();
+      }
+    }
+  }, { passive: false });
+
+  const endJoystick = (e) => {
+    for (const t of e.changedTouches) {
+      if (joystickTouch && t.identifier === joystickTouch.id) {
+        joystickTouch = null;
+        jCanvas.style.display = 'none';
+        keys.up = false; keys.down = false; keys.left = false; keys.right = false;
+      }
+    }
+  };
+  zone.addEventListener('touchend', endJoystick, { passive: false });
+  zone.addEventListener('touchcancel', endJoystick, { passive: false });
+}
+
+function updateMovementFromJoystick() {
+  if (!joystickTouch) { keys.up = false; keys.down = false; keys.left = false; keys.right = false; return; }
+  let dx = joystickTouch.currentX - joystickTouch.startX;
+  let dy = joystickTouch.currentY - joystickTouch.startY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist < JOYSTICK_DEAD_ZONE) { keys.up = false; keys.down = false; keys.left = false; keys.right = false; return; }
+  const nx = dx / dist, ny = dy / dist;
+  const threshold = 0.38;
+  keys.left = nx < -threshold;
+  keys.right = nx > threshold;
+  keys.up = ny < -threshold;
+  keys.down = ny > threshold;
+  keys.sprint = sprintToggle;
+}
+
+function drawJoystick(jCtx, cx, cy, dx, dy) {
+  jCtx.clearRect(0, 0, 200, 200);
+  jCtx.beginPath(); jCtx.arc(cx, cy, JOYSTICK_RADIUS, 0, Math.PI * 2);
+  jCtx.strokeStyle = 'rgba(255,255,255,0.2)'; jCtx.lineWidth = 2; jCtx.stroke();
+  jCtx.fillStyle = 'rgba(255,255,255,0.05)'; jCtx.fill();
+  jCtx.beginPath(); jCtx.arc(cx + dx, cy + dy, 22, 0, Math.PI * 2);
+  jCtx.fillStyle = 'rgba(255,255,255,0.3)'; jCtx.fill();
+  jCtx.strokeStyle = 'rgba(255,255,255,0.5)'; jCtx.lineWidth = 2; jCtx.stroke();
+}
+
+function setupAimPadZone() {
+  const zone = $('aimPadZone');
+
+  zone.addEventListener('touchstart', (e) => {
+    if (aimPadTouch !== null) return;
+    if (buffPickerChoices) return;
+    const t = e.changedTouches[0];
+    aimPadTouch = { id: t.identifier, startX: t.clientX, startY: t.clientY, currentX: t.clientX, currentY: t.clientY };
+    updateAimFromPad();
+    mouseDown = true;
+  }, { passive: false });
+
+  zone.addEventListener('touchmove', (e) => {
+    for (const t of e.changedTouches) {
+      if (aimPadTouch && t.identifier === aimPadTouch.id) {
+        aimPadTouch.currentX = t.clientX;
+        aimPadTouch.currentY = t.clientY;
+        updateAimFromPad();
+      }
+    }
+  }, { passive: false });
+
+  const endAim = (e) => {
+    for (const t of e.changedTouches) {
+      if (aimPadTouch && t.identifier === aimPadTouch.id) {
+        aimPadTouch = null;
+        mouseDown = false;
+      }
+    }
+  };
+  zone.addEventListener('touchend', endAim, { passive: false });
+  zone.addEventListener('touchcancel', endAim, { passive: false });
+}
+
+function updateAimFromPad() {
+  if (!aimPadTouch) return;
+  const dx = aimPadTouch.currentX - aimPadTouch.startX;
+  const dy = aimPadTouch.currentY - aimPadTouch.startY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist < 8) return; // dead zone — keep last aim
+  const angle = Math.atan2(dy, dx);
+  mouseX = canvas.width / 2 + Math.cos(angle) * 200;
+  mouseY = canvas.height / 2 + Math.sin(angle) * 200;
+}
+
+function setupTouchButtons() {
+  const reloadBtn = $('touchReloadBtn');
+  const abilityBtn = $('touchAbilityBtn');
+  const sprintBtn = $('touchSprintBtn');
+
+  reloadBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (isHost && gameState) { const me = gameState.players['0']; if (me && me.alive) tryReload(me, Date.now()); }
+    else if (hostConn && hostConn.open) hostConn.send({ type: 'reload' });
+    reloadBtn.classList.add('active');
+  }, { passive: false });
+  reloadBtn.addEventListener('touchend', (e) => { e.preventDefault(); reloadBtn.classList.remove('active'); }, { passive: false });
+
+  abilityBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (isHost && gameState) { const me = gameState.players['0']; if (me) activateAbility(me, '0', Date.now()); }
+    else if (hostConn && hostConn.open) hostConn.send({ type: 'ability' });
+    abilityBtn.classList.add('active');
+  }, { passive: false });
+  abilityBtn.addEventListener('touchend', (e) => { e.preventDefault(); abilityBtn.classList.remove('active'); }, { passive: false });
+
+  sprintBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    sprintToggle = !sprintToggle;
+    sprintBtn.classList.toggle('active', sprintToggle);
+    keys.sprint = sprintToggle;
+  }, { passive: false });
+}
 
 // ========================
 // RENDERING
