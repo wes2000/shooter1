@@ -216,6 +216,87 @@
     #abilityKey { font-size: 10px; color: #666; }
     #abilityDisplay.ready #abilityCdFill { background: #3498db; }
     #abilityDisplay.cooldown #abilityCdFill { background: #555; }
+
+    /* Shield Bar */
+    #shieldBar {
+      display: none;
+      position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%);
+      width: 200px; height: 6px; background: #222; border-radius: 3px; overflow: hidden;
+    }
+    #shieldFill { height: 100%; background: #00d4ff; border-radius: 3px; transition: width 0.15s; }
+
+    /* Buff Selection Overlay */
+    #buffSelection {
+      display: none;
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.75);
+      z-index: 10;
+      pointer-events: all;
+    }
+    .buff-title {
+      font-size: 32px; font-weight: 800; color: #fff;
+      text-shadow: 0 0 20px rgba(255,255,255,0.3);
+      margin-bottom: 4px;
+    }
+    .buff-subtitle {
+      font-size: 16px; font-weight: 600; letter-spacing: 3px;
+      margin-bottom: 24px;
+    }
+    .buff-cards {
+      display: flex; gap: 16px;
+    }
+    .buff-card {
+      width: 200px; padding: 20px 16px;
+      background: rgba(20, 20, 50, 0.95);
+      border: 2px solid #555; border-radius: 12px;
+      cursor: pointer; text-align: center;
+      transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+      position: relative;
+    }
+    .buff-card:hover {
+      transform: scale(1.08);
+      box-shadow: 0 0 25px rgba(255,255,255,0.15);
+    }
+    .buff-card-name {
+      font-size: 16px; font-weight: 700; color: #fff;
+      margin-bottom: 8px;
+    }
+    .buff-card-desc {
+      font-size: 12px; color: #aaa; line-height: 1.4;
+    }
+    .buff-card-stacked {
+      margin-top: 8px; font-size: 10px; font-weight: 600;
+      color: #f39c12; letter-spacing: 1px;
+    }
+    .buff-stack-badge {
+      position: absolute; top: -8px; right: -8px;
+      background: #f39c12; color: #000; font-size: 11px; font-weight: 800;
+      padding: 2px 6px; border-radius: 10px;
+    }
+
+    /* Buff Bar (HUD) */
+    #buffBar {
+      display: none;
+      position: absolute; bottom: 55px; left: 50%; transform: translateX(-50%);
+      flex-wrap: wrap; gap: 4px; justify-content: center; max-width: 400px;
+    }
+    .buff-icon {
+      width: 24px; height: 24px;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid #555; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      position: relative; cursor: default;
+    }
+    .buff-icon-letter {
+      font-size: 11px; font-weight: 700;
+    }
+    .buff-icon-count {
+      position: absolute; top: -4px; right: -4px;
+      font-size: 8px; font-weight: 800;
+      background: #f39c12; color: #000;
+      border-radius: 6px; padding: 0 3px; min-width: 12px; text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -294,8 +375,11 @@
         <span>RELOADING</span>
       </div>
       <div id="controlsHint">WASD move &middot; Mouse aim &middot; Click shoot &middot; R reload &middot; SPACE ability</div>
+      <div id="buffBar"></div>
+      <div id="shieldBar"><div id="shieldFill"></div></div>
       <div id="healthBar"><div id="healthFill"></div></div>
       <div id="deathOverlay">YOU DIED — respawning...</div>
+      <div id="buffSelection"></div>
     </div>
   </div>
 
