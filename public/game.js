@@ -117,6 +117,14 @@ const OFFENSIVE_BUFF_IDS = Object.keys(BUFF_DEFS).filter(k => BUFF_DEFS[k].type 
 const DEFENSIVE_BUFF_IDS = Object.keys(BUFF_DEFS).filter(k => BUFF_DEFS[k].type === 'defensive');
 const SHRAPNEL_RADIUS = 40, SHRAPNEL_DMG = 15;
 const CHAIN_LIGHTNING_RANGE = 120, CHAIN_LIGHTNING_DMG = 8;
+const RANDOM_PICKUP_TYPES = ['shotgun','smg','sniper','piercing','explosive','buff'];
+const RANDOM_PICKUP_INTERVAL = 5000;
+const RANDOM_PICKUP_LIFETIME = 10000;
+const WEAPON_DISPLAY_NAMES = { explosive: 'Explosion', thorns: 'Thorn Armor', bleed: 'Bleed', chain_lightning: 'Chain Lightning', turret: 'Turret' };
+const SPRINT_MAX = 120; // 2 seconds at 60fps
+const SPRINT_DRAIN = 1;
+const SPRINT_RECHARGE = 0.5; // ~4s full recharge
+const SPRINT_SPEED_BONUS = 1.15;
 
 function generateBuffChoices(isOffensive) {
   const pool = isOffensive ? [...OFFENSIVE_BUFF_IDS] : [...DEFENSIVE_BUFF_IDS];
@@ -276,7 +284,7 @@ let gameLoopInterval = null;
 let hostConn = null;
 
 let snapshot = null;
-let keys = { up: false, down: false, left: false, right: false };
+let keys = { up: false, down: false, left: false, right: false, sprint: false };
 let mouseX = 0, mouseY = 0, mouseDown = false;
 let camera = { x: 0, y: 0 };
 let inputInterval = null;
@@ -374,7 +382,7 @@ function createRoom() {
       }
       if (data.type === 'input' && pid && gameState && gameState.players[pid]) {
         const p = gameState.players[pid];
-        if (data.keys) { p.input.up = !!data.keys.up; p.input.down = !!data.keys.down; p.input.left = !!data.keys.left; p.input.right = !!data.keys.right; }
+        if (data.keys) { p.input.up = !!data.keys.up; p.input.down = !!data.keys.down; p.input.left = !!data.keys.left; p.input.right = !!data.keys.right; p.input.sprint = !!data.keys.sprint; }
         if (typeof data.angle === 'number') p.angle = data.angle;
         if (typeof data.shooting === 'boolean') p.shooting = data.shooting;
       }
@@ -511,6 +519,8 @@ function initPlayer(id, x, y, colorIdx) {
     consecutiveHitCount: 0,
     consecutiveHitTimer: 0,
     lastRegenTick: 0,
+    lastKilledBy: null,
+    sprintFuel: SPRINT_MAX,
   };
 }
 
@@ -523,6 +533,7 @@ function createGameState() {
     explosions: [], killEvents: [],
     turrets: [], turretIdCounter: 0,
     shieldWalls: [], shieldWallIdCounter: 0,
+    nextRandomSpawn: Date.now() + 3000, randomPickupId: 10000,
   };
   const ids = Object.keys(lobbyPlayers);
   ids.forEach((id, i) => {
@@ -724,6 +735,7 @@ function applyDamageToPlayer(p, pid, damage, attackerId, weapon, now) {
 
 function killPlayer(p, pid, killerId, weapon, now) {
   p.alive = false; p.deaths++;
+  p.lastKilledBy = null;
   p.gotKillThisLife = p.killsThisLife > 0;
   p.killsThisLife = 0;
   p.respawnTimer = now + getRespawnTime(p);
@@ -737,6 +749,7 @@ function killPlayer(p, pid, killerId, weapon, now) {
     const killer = gameState.players[killerId];
     killer.kills++;
     killer.killsThisLife++;
+    p.lastKilledBy = { name: killer.name, weapon, color: killer.color, playerClass: killer.playerClass, buffs: { ...killer.buffs } };
     gameState.killEvents.push({ killerId, killer: killer.name, victim: p.name, weapon });
     // Adrenaline Rush
     if (killer.buffs.adrenaline_rush) {
@@ -768,6 +781,7 @@ function applyPickup(p, pickup) {
       else { p.weapon = pickup.type; p.ammo = WEAPONS[pickup.type].clip; p.reserveAmmo = WEAPONS[pickup.type].reserveAmmo; p.reloading = false; p.ammoMod = null; }
       break;
     case 'piercing': case 'explosive': p.ammoMod = pickup.type; break;
+    case 'buff': if (pickup.buffId) applyBuff(p, pickup.buffId); break;
   }
 }
 
@@ -781,6 +795,29 @@ function updateGame() {
 
   // Respawn pickups
   for (const pk of gameState.pickups) { if (!pk.active && now >= pk.respawnTime) pk.active = true; }
+
+  // Expire timed pickups
+  for (let i = gameState.pickups.length - 1; i >= 0; i--) {
+    if (gameState.pickups[i].expiresAt && now >= gameState.pickups[i].expiresAt) {
+      gameState.pickups.splice(i, 1);
+    }
+  }
+  // Spawn random weapon/buff pickups
+  if (now >= gameState.nextRandomSpawn) {
+    const type = RANDOM_PICKUP_TYPES[Math.floor(Math.random() * RANDOM_PICKUP_TYPES.length)];
+    const pos = safeSpawnPos();
+    let buffId = null;
+    if (type === 'buff') {
+      const pool = Math.random() < 0.5 ? OFFENSIVE_BUFF_IDS : DEFENSIVE_BUFF_IDS;
+      buffId = pool[Math.floor(Math.random() * pool.length)];
+    }
+    gameState.pickups.push({
+      id: gameState.randomPickupId++,
+      x: pos.x, y: pos.y, type, active: true, respawnTime: 0,
+      expiresAt: now + RANDOM_PICKUP_LIFETIME, buffId,
+    });
+    gameState.nextRandomSpawn = now + RANDOM_PICKUP_INTERVAL + Math.random() * 3000;
+  }
 
   // Update turrets
   for (let i = gameState.turrets.length - 1; i >= 0; i--) {
@@ -827,6 +864,7 @@ function updateGame() {
         p.abilityCdStart = -99999;
         p.slowEnd = 0; p.bleedEffects = [];
         p.consecutiveHitCount = 0;
+        p.sprintFuel = SPRINT_MAX;
         // Spawn Shield
         if (p.buffs.spawn_shield) p.spawnShieldEnd = now + 2500 * p.buffs.spawn_shield;
         // Field Medic - heal nearby allies
@@ -873,10 +911,19 @@ function updateGame() {
     if (p.input.left) dx -= 1; if (p.input.right) dx += 1;
     if (dx || dy) {
       const len = Math.sqrt(dx*dx + dy*dy);
-      const effectiveSpeed = p.speed * bs.speedMult;
+      let effectiveSpeed = p.speed * bs.speedMult;
+      // Sprint
+      if (p.input.sprint && p.sprintFuel > 0) {
+        effectiveSpeed *= SPRINT_SPEED_BONUS;
+        p.sprintFuel = Math.max(0, p.sprintFuel - SPRINT_DRAIN);
+      }
       dx = (dx/len) * effectiveSpeed; dy = (dy/len) * effectiveSpeed;
       p.x += dx; p.y += dy;
       p.lastMoveTime = now;
+    }
+    // Sprint recharge when not sprinting
+    if (!(p.input.sprint && (dx || dy) && p.sprintFuel > 0) && p.sprintFuel < SPRINT_MAX) {
+      p.sprintFuel = Math.min(SPRINT_MAX, p.sprintFuel + SPRINT_RECHARGE);
     }
     resolvePlayerWalls(p);
     p.x = Math.max(PLAYER_R, Math.min(MAP_W - PLAYER_R, p.x));
@@ -929,7 +976,7 @@ function updateGame() {
         } else {
           applyPickup(p, pk);
         }
-        if (pk.scavengerExpire) { gameState.pickups.splice(pki, 1); }
+        if (pk.scavengerExpire || pk.expiresAt) { gameState.pickups.splice(pki, 1); }
         else { pk.active = false; pk.respawnTime = now + PICKUP_RESPAWN; }
         break;
       }
@@ -1109,14 +1156,16 @@ function getSnapshot() {
       shieldHp: p.shieldHp,
       shieldMax: p.shieldMax,
       respawnCountdown: (!p.alive && p.respawnTimer) ? Math.max(0, (p.respawnTimer - now) / 1000) : 0,
+      sprintFuel: p.sprintFuel / SPRINT_MAX,
       spawnShielded: p.spawnShieldEnd && now < p.spawnShieldEnd,
       tracked: p.trackedUntil && now < p.trackedUntil,
+      lastKilledBy: p.lastKilledBy || null,
     };
   }
   return {
     players,
     bullets: gameState.bullets.map(b => ({ id: b.id, x: b.x, y: b.y, ownerId: b.ownerId, weapon: b.weapon, ammoMod: b.ammoMod })),
-    pickups: gameState.pickups.map(p => ({ id: p.id, x: p.x, y: p.y, type: p.type, active: p.active })),
+    pickups: gameState.pickups.map(p => ({ id: p.id, x: p.x, y: p.y, type: p.type, active: p.active, expiresIn: p.expiresAt ? Math.max(0, (p.expiresAt - now) / 1000) : 0, buffId: p.buffId || null })),
     explosions: gameState.explosions.map(e => ({ x: e.x, y: e.y, age: now - e.time })),
     turrets: gameState.turrets.map(t => ({ id: t.id, x: t.x, y: t.y, hp: t.hp, maxHp: t.maxHp, ownerId: t.ownerId, ownerColor: t.ownerColor, angle: t.angle })),
     shieldWalls: gameState.shieldWalls.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, ownerId: s.ownerId })),
@@ -1180,7 +1229,7 @@ function cleanupGame() {
   if (peer) { try { peer.destroy(); } catch(e) {} }
   hostConns = {}; lobbyPlayers = {}; gameState = null; snapshot = null;
   hostConn = null; peer = null; myPlayerId = null; isHost = false; nextPlayerId = 1;
-  keys = { up: false, down: false, left: false, right: false }; mouseDown = false;
+  keys = { up: false, down: false, left: false, right: false, sprint: false }; mouseDown = false;
   killNotifications = [];
   buffPickerChoices = null;
   isPublicGame = false;
@@ -1261,6 +1310,7 @@ window.addEventListener('keydown', (e) => {
     case 's': keys.down = true; break;
     case 'a': keys.left = true; break;
     case 'd': keys.right = true; break;
+    case 'shift': keys.sprint = true; break;
     case 'r':
       if (isHost && gameState) { const me = gameState.players['0']; if (me && me.alive) tryReload(me, Date.now()); }
       else if (hostConn && hostConn.open) hostConn.send({ type: 'reload' });
@@ -1276,6 +1326,7 @@ window.addEventListener('keyup', (e) => {
   switch (e.key.toLowerCase()) {
     case 'w': keys.up = false; break; case 's': keys.down = false; break;
     case 'a': keys.left = false; break; case 'd': keys.right = false; break;
+    case 'shift': keys.sprint = false; break;
   }
 });
 window.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
@@ -1337,7 +1388,7 @@ function render() {
       if (!pk.active) continue;
       const sx = pk.x - camera.x, sy = pk.y - camera.y + Math.sin(bobT + pk.id) * 3;
       if (sx < -30 || sx > W+30 || sy < -30 || sy > H+30) continue;
-      renderPickup(sx, sy, pk.type);
+      renderPickup(sx, sy, pk.type, pk.expiresIn || 0, pk.buffId);
     }
   }
 
@@ -1488,25 +1539,75 @@ function getBulletStyle(b) {
   return { color, radius, glow };
 }
 
-const PICKUP_COLORS = { health: '#2ecc71', shotgun: '#ff6b35', smg: '#ffd700', sniper: '#00ffff', piercing: '#a855f7', explosive: '#ff4444' };
+const PICKUP_COLORS = { health: '#2ecc71', shotgun: '#ff6b35', smg: '#ffd700', sniper: '#00ffff', piercing: '#a855f7', explosive: '#ff4444', buff: '#f39c12' };
 
-function renderPickup(sx, sy, type) {
+function renderPickup(sx, sy, type, expiresIn, buffId) {
   const color = PICKUP_COLORS[type] || '#fff';
-  ctx.globalAlpha = 0.25; ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 18, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+  // Glow background
+  ctx.globalAlpha = 0.2; ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 18, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+  // Countdown ring for timed pickups
+  if (expiresIn > 0 && expiresIn <= 10) {
+    const pct = expiresIn / 10;
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.arc(sx, sy, 20, -Math.PI/2, -Math.PI/2 + Math.PI*2*pct); ctx.stroke();
+    ctx.globalAlpha = 1;
+    // Flash when low
+    if (expiresIn < 3) ctx.globalAlpha = 0.5 + Math.sin(Date.now()/100) * 0.3;
+  }
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   if (type === 'health') {
     ctx.fillStyle = color; ctx.fillRect(sx-7, sy-2, 14, 4); ctx.fillRect(sx-2, sy-7, 4, 14);
+  } else if (type === 'shotgun') {
+    // Barrel + spread lines
+    ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(sx-8, sy); ctx.lineTo(sx+2, sy); ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(sx+2, sy); ctx.lineTo(sx+10, sy-5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx+2, sy); ctx.lineTo(sx+11, sy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx+2, sy); ctx.lineTo(sx+10, sy+5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx-3, sy); ctx.lineTo(sx-5, sy+6); ctx.stroke();
+  } else if (type === 'smg') {
+    ctx.fillStyle = color;
+    ctx.fillRect(sx-7, sy-2, 14, 4);
+    ctx.fillRect(sx+4, sy-4, 3, 2);
+    ctx.fillRect(sx-2, sy+2, 4, 4);
+  } else if (type === 'sniper') {
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(sx-12, sy); ctx.lineTo(sx+12, sy); ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(sx-4, sy); ctx.lineTo(sx+6, sy); ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(sx+3, sy-4, 2.5, 0, Math.PI*2); ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(sx+3, sy-1.5); ctx.lineTo(sx+3, sy); ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(sx-1, sy); ctx.lineTo(sx-2, sy+5); ctx.stroke();
   } else if (type === 'piercing' || type === 'explosive') {
     ctx.fillStyle = color; ctx.beginPath();
     ctx.moveTo(sx, sy-10); ctx.lineTo(sx+8, sy); ctx.lineTo(sx, sy+10); ctx.lineTo(sx-8, sy);
     ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 8px sans-serif';
     ctx.fillText(type === 'piercing' ? 'P' : 'E', sx, sy);
+  } else if (type === 'buff') {
+    const bDef = buffId ? BUFF_DEFS[buffId] : null;
+    const bColor = bDef && bDef.type === 'offensive' ? '#e74c3c' : '#3498db';
+    ctx.fillStyle = bColor; ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI/2 + (i * Math.PI / 5);
+      const r = i % 2 === 0 ? 11 : 5;
+      if (i === 0) ctx.moveTo(sx + Math.cos(a)*r, sy + Math.sin(a)*r);
+      else ctx.lineTo(sx + Math.cos(a)*r, sy + Math.sin(a)*r);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke();
+    if (bDef) { ctx.fillStyle = '#fff'; ctx.font = 'bold 7px sans-serif'; ctx.fillText(bDef.name[0], sx, sy+1); }
   } else {
     ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 11, 0, Math.PI*2); ctx.fill();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = '#000'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000'; ctx.font = 'bold 11px sans-serif';
     ctx.fillText(type[0].toUpperCase(), sx, sy);
   }
+  ctx.restore();
 }
 
 function renderMinimap() {
@@ -1638,6 +1739,13 @@ function renderHUD() {
   healthFill.style.width = (hpPct*100) + '%';
   healthFill.style.background = hpPct > 0.5 ? '#2ecc71' : hpPct > 0.25 ? '#f39c12' : '#e74c3c';
 
+  // Sprint bar
+  const sprintFillEl = $('sprintFill');
+  if (sprintFillEl) {
+    sprintFillEl.style.width = ((me.sprintFuel || 0) * 100) + '%';
+    sprintFillEl.style.background = (me.sprintFuel || 0) < 0.2 ? '#e74c3c' : '#f1c40f';
+  }
+
   // Shield bar
   const shieldBarEl = $('shieldBar');
   if (me.shieldMax > 0) {
@@ -1655,11 +1763,33 @@ function renderHUD() {
     } else {
       deathOverlay.style.display = 'block';
       $('buffSelection').style.display = 'none';
-      if (me.respawnCountdown > 0) {
-        deathOverlay.textContent = `YOU DIED \u2014 ${Math.ceil(me.respawnCountdown)}`;
-      } else {
-        deathOverlay.textContent = 'YOU DIED \u2014 respawning...';
+      let dhtml = '';
+      if (me.lastKilledBy) {
+        const kb = me.lastKilledBy;
+        const wepName = WEAPONS[kb.weapon] ? WEAPONS[kb.weapon].name : (WEAPON_DISPLAY_NAMES[kb.weapon] || kb.weapon);
+        const wepColor = (WEAPONS[kb.weapon] && WEAPONS[kb.weapon].bulletColor) || (kb.weapon === 'explosive' ? '#ff4444' : kb.weapon === 'thorns' ? '#f39c12' : '#ccc');
+        const barW = {pistol:16,shotgun:20,smg:22,sniper:30}[kb.weapon] || 16;
+        const barH = {pistol:4,shotgun:6,smg:3,sniper:2}[kb.weapon] || 4;
+        dhtml += `<div class="death-killed-by">Killed by</div>`;
+        dhtml += `<div class="death-killer-name" style="color:${kb.color}">${escapeHtml(kb.name)}</div>`;
+        dhtml += `<div class="death-weapon-info"><span style="display:inline-block;width:${barW}px;height:${barH}px;background:${wepColor};border-radius:1px"></span><span style="color:${wepColor}">${escapeHtml(wepName)}</span></div>`;
+        if (kb.buffs && Object.keys(kb.buffs).length > 0) {
+          dhtml += '<div class="death-killer-buffs">';
+          for (const [bid, cnt] of Object.entries(kb.buffs)) {
+            if (!cnt || !BUFF_DEFS[bid]) continue;
+            const def = BUFF_DEFS[bid];
+            const bc = def.type === 'offensive' ? '#e74c3c' : '#3498db';
+            dhtml += `<div class="death-buff-icon" style="border-color:${bc};color:${bc}" title="${escapeHtml(def.name)}: ${escapeHtml(def.desc)}">${def.name[0]}${cnt > 1 ? cnt : ''}</div>`;
+          }
+          dhtml += '</div>';
+        }
       }
+      if (me.respawnCountdown > 0) {
+        dhtml += `<div class="death-countdown">${Math.ceil(me.respawnCountdown)}</div>`;
+      } else {
+        dhtml += '<div class="death-countdown" style="font-size:16px">Choosing buff...</div>';
+      }
+      deathOverlay.innerHTML = dhtml;
     }
   } else {
     deathOverlay.style.display = 'none';
@@ -1688,12 +1818,13 @@ function renderHUD() {
 
   // Scoreboard
   const sorted = Object.entries(snapshot.players).sort(([,a],[,b]) => b.kills-a.kills || a.deaths-b.deaths);
-  scoreboardEl.innerHTML = `<div class="sb-header">Scoreboard</div>` +
+  scoreboardEl.innerHTML = `<div class="sb-header-row"><span class="sb-col-name">Player</span><span class="sb-col-k">K</span><span class="sb-col-d">D</span></div>` +
     sorted.map(([id, p]) => {
       const buffCount = p.buffs ? Object.values(p.buffs).reduce((a,b)=>a+b,0) : 0;
       return `<div class="sb-row" style="${id===myPlayerId?'color:#fff;font-weight:600':''}">
       <span class="sb-name" style="color:${p.color}">${escapeHtml(p.name)}${buffCount ? ` <span style="color:#888;font-size:10px">[${buffCount}]</span>` : ''}</span>
-      <span class="sb-kd">${p.kills}K / ${p.deaths}D</span>
+      <span class="sb-kills">${p.kills}</span>
+      <span class="sb-deaths">${p.deaths}</span>
     </div>`;
     }).join('');
 

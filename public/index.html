@@ -192,19 +192,36 @@
       background: rgba(0,0,0,0.7); border-radius: 8px;
       padding: 10px 14px; font-size: 13px; min-width: 160px;
     }
-    .sb-header { font-weight: 700; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }
-    .sb-row { display: flex; justify-content: space-between; padding: 2px 0; }
-    .sb-row .sb-name { margin-right: 16px; }
-    .sb-row .sb-kd { color: #aaa; }
+    .sb-header-row { display: flex; align-items: center; font-weight: 700; border-bottom: 1px solid #444; padding-bottom: 4px; margin-bottom: 4px; font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+    .sb-row { display: flex; align-items: center; padding: 2px 0; }
+    .sb-col-name, .sb-name { flex: 1; text-align: left; }
+    .sb-col-k, .sb-col-d { width: 28px; text-align: center; }
+    .sb-kills { width: 28px; text-align: center; color: #2ecc71; font-weight: 600; }
+    .sb-deaths { width: 28px; text-align: center; color: #e74c3c; }
     #healthBar {
       position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
       width: 200px; height: 12px; background: #333; border-radius: 6px; overflow: hidden;
     }
     #healthFill { height: 100%; background: #2ecc71; transition: width 0.15s; border-radius: 6px; }
+    #sprintBar {
+      position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+      width: 200px; height: 4px; background: #222; border-radius: 2px; overflow: hidden;
+    }
+    #sprintFill { height: 100%; background: #f1c40f; border-radius: 2px; transition: width 0.08s; }
     #deathOverlay {
       display: none; position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -50%); font-size: 28px; font-weight: 700;
-      color: #e74c3c; text-shadow: 0 0 20px rgba(231,76,60,0.5);
+      transform: translate(-50%, -50%); text-align: center; color: #e74c3c;
+    }
+    .death-countdown { font-size: 48px; font-weight: 800; text-shadow: 0 0 20px rgba(231,76,60,0.5); }
+    .death-killed-by { font-size: 13px; color: #888; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 2px; }
+    .death-killer-name { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .death-weapon-info { font-size: 15px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .death-killer-buffs { display: flex; gap: 3px; justify-content: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .death-buff-icon {
+      width: 20px; height: 20px; border-radius: 3px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; border: 1px solid;
+      background: rgba(0,0,0,0.4);
     }
     #leaveBtn {
       position: absolute; top: 10px; left: 10px;
@@ -420,10 +437,11 @@
         <div id="reloadBarInner"><div id="reloadFill"></div></div>
         <span>RELOADING</span>
       </div>
-      <div id="controlsHint">WASD move &middot; Mouse aim &middot; Click shoot &middot; R reload &middot; SPACE ability</div>
+      <div id="controlsHint">WASD move &middot; Shift sprint &middot; Mouse aim &middot; Click shoot &middot; R reload &middot; SPACE ability</div>
       <div id="buffBar"></div>
       <div id="shieldBar"><div id="shieldFill"></div></div>
       <div id="healthBar"><div id="healthFill"></div></div>
+      <div id="sprintBar"><div id="sprintFill"></div></div>
       <div id="deathOverlay">YOU DIED — respawning...</div>
       <div id="buffSelection"></div>
     </div>
