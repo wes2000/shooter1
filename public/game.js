@@ -498,6 +498,8 @@ function initPlayer(id, x, y, colorIdx) {
 }
 
 function createGameState() {
+  // Add a bot to lobby
+  lobbyPlayers['bot1'] = { name: 'BOT', ready: true, playerClass: 'tank' };
   const state = {
     players: {}, bullets: [], bulletIdCounter: 0,
     pickups: PICKUP_DEFS.map((d, i) => ({ id: i, x: d.x, y: d.y, type: d.type, active: true, respawnTime: 0 })),
@@ -510,7 +512,42 @@ function createGameState() {
     const a = (2 * Math.PI * i) / ids.length;
     state.players[id] = initPlayer(id, MAP_W/2 + Math.cos(a)*300, MAP_H/2 + Math.sin(a)*300, i);
   });
+  // Mark bot
+  state.players['bot1'].isBot = true;
   return state;
+}
+
+function updateBots(now) {
+  for (const id in gameState.players) {
+    const bot = gameState.players[id];
+    if (!bot.isBot || !bot.alive) {
+      // Bot auto-picks a buff when pending
+      if (bot && bot.isBot && !bot.alive && Array.isArray(bot.pendingBuffChoices)) {
+        const pick = bot.pendingBuffChoices[Math.floor(Math.random() * bot.pendingBuffChoices.length)];
+        handleSelectBuff(id, pick);
+      }
+      continue;
+    }
+    // Find nearest player
+    let nearest = null, nearDist = Infinity;
+    for (const pid in gameState.players) {
+      if (pid === id) continue;
+      const p = gameState.players[pid];
+      if (!p.alive || p.cloaked) continue;
+      const d = Math.sqrt((p.x - bot.x)**2 + (p.y - bot.y)**2);
+      if (d < nearDist) { nearDist = d; nearest = p; }
+    }
+    // Aim + shoot at nearest, don't move
+    bot.input = { up: false, down: false, left: false, right: false };
+    if (nearest && nearDist < 500) {
+      bot.angle = Math.atan2(nearest.y - bot.y, nearest.x - bot.x);
+      bot.shooting = true;
+    } else {
+      bot.shooting = false;
+    }
+    // Auto-reload
+    if (bot.ammo <= 0 && !bot.reloading) tryReload(bot, now);
+  }
 }
 
 function tryReload(p, now) {
@@ -792,6 +829,9 @@ function updateGame() {
       continue;
     }
 
+    // Compute buff stats for this player
+    const bs = getBuffStats(p);
+
     // Expire cloak
     if (p.cloaked && now >= p.cloakEnd) p.cloaked = false;
     // Expire dash invuln
@@ -809,9 +849,6 @@ function updateGame() {
         p.ammoMod = null;
       }
     }
-
-    // Compute buff stats for this player
-    const bs = getBuffStats(p);
 
     // Movement
     let dx = 0, dy = 0;
@@ -1084,6 +1121,7 @@ function startGameHost() {
       me.angle = Math.atan2(mouseY - canvas.height/2, mouseX - canvas.width/2);
       me.shooting = mouseDown;
     }
+    updateBots(Date.now());
     updateGame();
     snapshot = getSnapshot();
     // Host buff picker state
